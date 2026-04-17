@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.env
+.cache/
+
+# Model files (large)
+*.pkl
+*.joblib
+.results/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs & Data
+*.log
+*.db
+newsapi_quota.json
+
+# TradingAgents 
+TradingAgents/
