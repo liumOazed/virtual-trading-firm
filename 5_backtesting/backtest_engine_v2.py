@@ -372,7 +372,7 @@ class KalmanEnsemble:
         self.P = (1 - K) * self.P
 
         # Normalise: softmax over positive weights
-        w_pos = np.clip(self.w, 0, None)
+        w_pos = np.clip(self.w, 0.05, None)  # minimum 5% floor, no ticker fully zeroed
         total = w_pos.sum()
         if total > 1e-6:
             return w_pos / total
@@ -949,7 +949,7 @@ class BacktestEngineV2:
                 # Blend: 50% Kalman + 50% competition weight
                 blended_w   = 0.5 * k_weight + 0.5 * c_weight
                 
-                print(f"DEBUG | {ticker} | k_weight={k_weight:.4f} c_weight={c_weight:.4f} blended_w={blended_w:.4f} pos_value=${equity * cfg.fixed_size * blended_w:,.0f}")
+                # print(f"DEBUG | {ticker} | k_weight={k_weight:.4f} c_weight={c_weight:.4f} blended_w={blended_w:.4f} pos_value=${equity * cfg.fixed_size * blended_w:,.0f}")
                 # Adjust proba by regime fitness
                 blended_proba = raw_proba * (1.0 + blended_w * 0.1)
                 blended_proba = min(blended_proba, 0.99)
@@ -958,13 +958,13 @@ class BacktestEngineV2:
                 eff_slip    = self.cfg.base_slippage
                 exec_price  = price * (1 + eff_slip)   # BUY at ask
 
-                pos_value   = equity * self.cfg.fixed_size * blended_w
+                pos_value = equity * self.cfg.fixed_size  # full 10% per position
                 shares      = pos_value / exec_price if exec_price > 0 else 0
 
                 if shares < 0.01:
                     continue
 
-                if blended_proba > self.cfg.buy_threshold:
+                if blended_proba > self.cfg.buy_threshold and blended_w > 0.05:
                     if ticker not in portfolio.positions:
                         portfolio.execute_trade(ticker, "BUY", pos_value,
                                                 exec_price, current_date)
