@@ -1090,11 +1090,11 @@ if __name__ == "__main__":
 
     cfg = BacktestConfig(
         tickers         = ["AAPL", "NVDA", "MSFT", "SPY", "QQQ", "TSLA"],
-        start_date      = "2023-01-01",
+        start_date      = "2020-01-01",
         end_date        = "2025-04-01",
         initial_capital = 100_000,
-        train_months    = 6,
-        oos_months      = 1,
+        train_months    = 12,
+        oos_months      = 2,
         retrain         = True,      # set True once retrain pipeline is wired
         fixed_size      = 0.10,
         base_slippage   = 0.001,
