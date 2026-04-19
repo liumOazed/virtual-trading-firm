@@ -303,6 +303,32 @@ class MultiAssetTradingEnv(gym.Env):
         return float(np.clip(reward / 10.0, -1.0, 1.0))
 
     def step(self, action: np.ndarray):
+        # ── skip non-rebalance bars (mark to market only) ─────────────────
+        if self.t % self.step_every != 0:
+            prices_now       = self.price_matrix[self.t]
+            prices_prev      = self.price_matrix[self.t - 1]
+            price_returns    = (prices_now / np.clip(prices_prev, 1e-9, None)) - 1
+            portfolio_return = float(np.dot(self.weights, price_returns))
+            self.equity      *= (1 + portfolio_return)
+            self.peak_equity  = max(self.peak_equity, self.equity)
+            self.t           += 1
+            done = self.t >= self.T
+            obs  = (self._get_obs() if not done
+                    else np.zeros(self.observation_space.shape, dtype=np.float32))
+            info = {
+                "date":             self.dates[self.t - 1],
+                "equity":           round(self.equity, 2),
+                "portfolio_return": round(portfolio_return, 6),
+                "weights":          dict(zip(self.tickers, self.weights.round(4))),
+                "drawdown":         round((self.peak_equity - self.equity) /
+                                        max(self.peak_equity, 1e-9), 4),
+            }
+            return obs, 0.0, done, False, info
+    # ── rebalance bar — existing code unchanged below ──────────────────
+
+        action      = np.clip(action, 1e-6, None)
+        new_weights = action / action.sum()
+        prev_weights = self.weights.copy()
         action      = np.clip(action, 1e-6, None)
         new_weights = action / action.sum()
         prev_weights = self.weights.copy()
@@ -395,6 +421,7 @@ class RLTradingAgent:
                  buffer_size:   int   = 100_000,
                  gamma:         float = 0.95,
                  tau:           float = 0.01,
+                 step_every:    int = 5,
                  ent_coef:      str   = "auto",
                  device:        str   = "auto"):
 
@@ -407,6 +434,7 @@ class RLTradingAgent:
         self.buffer_size = buffer_size
         self.gamma       = gamma
         self.tau         = tau
+        self.step_every   = step_every
         self.ent_coef    = ent_coef
         self.device      = device
         self.model:     Optional[SAC] = None
@@ -685,6 +713,7 @@ if __name__ == "__main__":
         price_matrix  = price_matrix,
         dates         = dates,
         train_ratio   = 0.85,
+        step_every       = 5, 
         # env kwargs
         turnover_penalty = 0.0005,
         slippage         = 0.001,
