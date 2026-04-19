@@ -1103,3 +1103,9 @@ if __name__ == "__main__":
     bt = BacktestEngineV2(cfg)
     bt.prepare()   # load → signals → regimes → correlation filter → decay
     bt.run()       # walk-forward OOS loop → stress tests → reports
+    
+    # Save price data for RL agent
+    import pickle
+    with open("5_backtesting/results/price_data.pkl", "wb") as f:
+        pickle.dump(bt.loader.price_data, f)
+    print("✅ price_data.pkl saved")

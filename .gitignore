@@ -1,30 +1,69 @@
-# Python
+# ========================================
+# Python & Virtual Environment
+# ========================================
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.env
+.venv/
 venv/
 env/
-.env
-.cache/
+ENV/
 
-# Model files (large)
+# ========================================
+# Models & Large Files
+# ========================================
 *.pkl
 *.joblib
-.results/
+*.h5
+*.onnx
 
-# IDE
+# ========================================
+# Backtesting & Results (Most Important)
+# ========================================
+5_backtesting/results/
+5_backtesting/*.csv
+5_backtesting/*.png
+5_backtesting/*.pkl
+5_backtesting/*.zip
+5_backtesting/*.log
+
+# Ignore all CSV, PNG, ZIP files project-wide
+*.csv
+*.png
+*.zip
+
+# ========================================
+# IDE & Editor Files
+# ========================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# OS
+# ========================================
+# OS Generated Files
+# ========================================
 .DS_Store
 Thumbs.db
+desktop.ini
+*.ini
 
-# Logs & Data
+# ========================================
+# Logs & Temporary Data
+# ========================================
 *.log
 *.db
 newsapi_quota.json
+*.tmp
 
-# TradingAgents 
+# ========================================
+# Other
+# ========================================
+# If you want to ignore the entire TradingAgents folder:
 TradingAgents/
+
+# Keep specific important files if needed (uncomment if you want to track them)
+# !TradingAgents/some_important_file.py
