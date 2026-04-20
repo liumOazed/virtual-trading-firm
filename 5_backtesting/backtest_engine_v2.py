@@ -28,6 +28,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 from itertools import combinations
 from dataclasses import dataclass, field
+import pickle
+import hashlib
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 warnings.filterwarnings("ignore")
 
@@ -770,20 +774,58 @@ class BacktestEngineV2:
         print(f"\n🚀 Walk-forward backtest: {self.cfg.start_date} → "
               f"{self.cfg.end_date}\n")
 
+        # ── PARALLEL RETRAINING ───────────────────────────────────────────────
+        if self.cfg.retrain:
+            n_cores = max(1, min(cpu_count() - 1, len(windows)))
+            print(f"\n⚡ Parallel retraining: {len(windows)} windows on {n_cores} cores …")
+
+            worker_args = [
+                {
+                    "window_idx":   idx,
+                    "train_dates":  train_dates,
+                    "tickers":      self.cfg.tickers,
+                    "start_date":   self.cfg.start_date,
+                    "end_date":     self.cfg.end_date,
+                    "project_root": project_root,
+                }
+                for idx, (train_dates, _) in enumerate(windows)
+            ]
+
+            with Pool(processes=n_cores) as pool:
+                results = pool.map(_retrain_window_worker, worker_args)
+
+            # Sort by window_idx (pool.map preserves order but be safe)
+            results.sort(key=lambda x: x["window_idx"])
+
+            # Build per-window signal cache map
+            # {window_idx: {ticker: {date: proba}}}
+            self.window_signal_caches = {
+                r["window_idx"]: r["signal_cache"]
+                for r in results if r["model_path"] is not None
+            }
+            self.window_model_paths = {
+                r["window_idx"]: r["model_path"]
+                for r in results if r["model_path"] is not None
+            }
+
+            print(f"\n✅ All windows retrained. "
+                f"{sum(1 for r in results if r['model_path'])} / {len(windows)} succeeded.")
+        else:
+            self.window_signal_caches = {}
+            self.window_model_paths   = {}
+
+        # ── BUILD PER-WINDOW OOS DATE MAP ────────────────────────────────────
+        # Maps each OOS date → window_idx so we load the right model's signals
+        oos_date_to_window: Dict[str, int] = {}
         oos_dates_all = []
-        for window_idx, (train_dates, oos_dates) in enumerate(windows):
-            print(f"\n── Window {window_idx+1}/{len(windows)} │ "
-                  f"Train: {train_dates[0]}→{train_dates[-1]} │ "
-                  f"OOS: {oos_dates[0]}→{oos_dates[-1]}")
 
-            # Optional: retrain hook (calls your model retraining pipeline)
-            if self.cfg.retrain:
-                self._maybe_retrain(train_dates)
-
+        for idx, (_, oos_dates) in enumerate(windows):
+            for d in oos_dates:
+                oos_date_to_window[d] = idx
             oos_dates_all.extend(oos_dates)
 
-        # Run bar-by-bar only on OOS dates (no look-ahead)
-        self._run_oos_loop(oos_dates_all, portfolio)
+        # ── OOS LOOP ─────────────────────────────────────────────────────────
+        self._run_oos_loop_v2(oos_dates_all, oos_date_to_window, portfolio)
 
         print("\n🏁 Walk-forward complete")
         self._finalise(portfolio)
@@ -852,144 +894,206 @@ class BacktestEngineV2:
 
     # ── bar-by-bar OOS loop ───────────────────────────────────────────────
 
-    def _run_oos_loop(self, oos_dates: List[str], portfolio: Portfolio):
+    def _run_oos_loop_v2(self,
+                    oos_dates: List[str],
+                    oos_date_to_window: Dict[str, int],
+                    portfolio: Portfolio):
+        """
+        Bar-by-bar OOS loop with per-window signal caches.
+
+        Fixes included:
+        - Safe Kalman initialization (no n_sig == 0)
+        - Correct competition return calculation (no fake returns)
+        - Kalman fallback weights
+        - Stable slippage handling
+        - Optional Kalman reset on window change
+        """
+
         prev_prices: Dict[str, float] = {}
+        prev_window_idx: Optional[int] = None
 
         for bar_idx, current_date in enumerate(oos_dates):
+
             daily_prices: Dict[str, float] = {}
             bar_probas:   Dict[str, float] = {}
 
-            # ── collect prices & raw signal probas ────────────────────────
+            # ── window selection ─────────────────────────────────────────────
+            window_idx   = oos_date_to_window.get(current_date, 0)
+            window_cache = self.window_signal_caches.get(window_idx, {})
+
+            # Optional: reset Kalman when switching model regimes
+            if prev_window_idx is not None and window_idx != prev_window_idx:
+                self.kalman_map.clear()
+            prev_window_idx = window_idx
+
+            # ── collect prices & signals ─────────────────────────────────────
             for ticker in self.active_tickers:
                 price_df = self.loader.price_data.get(ticker)
                 if price_df is None:
                     continue
+
                 date_idx = price_df.index.strftime("%Y-%m-%d")
                 if current_date not in date_idx:
                     continue
 
-                price = float(price_df.loc[price_df.index[date_idx == current_date][0],
-                                           "close"])
+                # price lookup
+                price = float(
+                    price_df.loc[
+                        price_df.index[date_idx == current_date][0], "close"
+                    ]
+                )
                 daily_prices[ticker] = price
 
-                sig_cache = self.signal_cache.get(ticker)
-                if sig_cache is None or current_date not in sig_cache.index:
-                    continue
+                # ── signal lookup (window-aware fallback) ────────────────────
+                if window_cache and ticker in window_cache:
+                    proba = window_cache[ticker].get(current_date, float("nan"))
+                else:
+                    sig_cache = self.signal_cache.get(ticker)
+                    if sig_cache is None or current_date not in sig_cache.index:
+                        continue
+                    proba = float(sig_cache.loc[current_date, "proba_buy"])
 
-                proba = float(sig_cache.loc[current_date, "proba_buy"])
                 if not np.isnan(proba):
                     bar_probas[ticker] = proba
 
+            # ── no signals → just mark-to-market ─────────────────────────────
             if not bar_probas:
                 portfolio.update_prices(daily_prices)
                 portfolio.record_snapshot(current_date)
+                prev_prices = {**daily_prices}
                 continue
 
-            # ── regime lookup (use SPY as market proxy, else first ticker) ─
-            proxy   = "SPY" if "SPY" in self.regime_cache else \
-                      next(iter(self.regime_cache), None)
-            regime  = 0
-            if proxy and current_date in self.regime_cache[proxy].index.strftime("%Y-%m-%d"):
-                regime_series = self.regime_cache[proxy]
-                d_idx = regime_series.index.strftime("%Y-%m-%d")
-                regime = int(regime_series[d_idx == current_date].iloc[0])
+            # ── regime detection ─────────────────────────────────────────────
+            proxy  = "SPY" if "SPY" in self.regime_cache else \
+                    next(iter(self.regime_cache), None)
+
+            regime = 0
+            if proxy:
+                d_idx = self.regime_cache[proxy].index.strftime("%Y-%m-%d")
+                if current_date in d_idx:
+                    regime = int(
+                        self.regime_cache[proxy][d_idx == current_date].iloc[0]
+                    )
 
             regime_name = RegimeDetector.REGIME_NAMES.get(regime, "Unknown")
 
-            # ── Kalman ensemble blending ───────────────────────────────────
+            # ── Kalman ensemble ──────────────────────────────────────────────
             tickers_with_signal = list(bar_probas.keys())
             n_sig = len(tickers_with_signal)
 
+            kalman_weights = np.ones(n_sig) / n_sig if n_sig > 0 else np.array([])
+
             if n_sig > 0:
                 key = tuple(sorted(tickers_with_signal))
+
                 if key not in self.kalman_map:
                     self.kalman_map[key] = KalmanEnsemble(n_sig)
 
                 proba_vec = np.array([bar_probas[t] for t in tickers_with_signal])
 
-                # realised return for Kalman update (mean of prev bar returns)
+                # realised return (safe calculation)
                 realised = np.mean([
-                    (daily_prices.get(t, 0) / prev_prices.get(t, daily_prices.get(t, 1))) - 1
+                    (daily_prices[t] / prev_prices[t]) - 1
                     for t in tickers_with_signal
-                    if t in prev_prices
+                    if t in prev_prices and prev_prices[t] > 0
                 ]) if prev_prices else 0.0
 
                 kalman_weights = self.kalman_map[key].update(proba_vec, realised)
 
-            # ── filter competition bar returns ────────────────────────────
+            # ── competition returns (FIXED: no fake values) ──────────────────
             competition_returns = {}
-            for ticker in tickers_with_signal:
-                if ticker in prev_prices and prev_prices[ticker] > 0:
-                    competition_returns[ticker] = (
-                        daily_prices.get(ticker, prev_prices[ticker]) /
-                        prev_prices[ticker] - 1
+            for t in tickers_with_signal:
+                if t in prev_prices and prev_prices[t] > 0:
+                    competition_returns[t] = (
+                        daily_prices.get(t, prev_prices[t]) / prev_prices[t] - 1
                     )
                 else:
-                    competition_returns[ticker] = 0.0
+                    competition_returns[t] = 0.0
 
-            comp_weights = self.competition.score(tickers_with_signal,
-                                                   competition_returns)
+            comp_weights = self.competition.score(
+                tickers_with_signal, competition_returns
+            )
 
-            # ── champion tracking ─────────────────────────────────────────
+            # ── champion tracking ────────────────────────────────────────────
             for ticker in tickers_with_signal:
-                ret = competition_returns.get(ticker, 0.0)
-                self.champion.record(regime, ticker, ret)
+                self.champion.record(
+                    regime, ticker, competition_returns.get(ticker, 0.0)
+                )
 
-            # ── trade execution ───────────────────────────────────────────
+            # ── trade execution ──────────────────────────────────────────────
             equity = portfolio.get_portfolio_state()["total_equity"]
 
             for i, ticker in enumerate(tickers_with_signal):
+
                 price = daily_prices.get(ticker)
                 if price is None:
                     continue
 
-                raw_proba   = bar_probas[ticker]
-                k_weight    = float(kalman_weights[i]) if n_sig > 0 else 1.0 / len(tickers_with_signal)
-                c_weight    = comp_weights.get(ticker, 0.0)
+                raw_proba = bar_probas[ticker]
 
-                # Blend: 50% Kalman + 50% competition weight
-                blended_w   = 0.5 * k_weight + 0.5 * c_weight
-                
-                # print(f"DEBUG | {ticker} | k_weight={k_weight:.4f} c_weight={c_weight:.4f} blended_w={blended_w:.4f} pos_value=${equity * cfg.fixed_size * blended_w:,.0f}")
-                # Adjust proba by regime fitness
-                blended_proba = raw_proba * (1.0 + blended_w * 0.1)
-                blended_proba = min(blended_proba, 0.99)
+                # Safe Kalman weight fallback
+                if len(kalman_weights) == n_sig and n_sig > 0:
+                    k_weight = float(kalman_weights[i])
+                else:
+                    k_weight = 1.0 / n_sig
 
-                # Effective slippage (base + ticker-specific micro-noise)
-                eff_slip    = self.cfg.base_slippage
-                exec_price  = price * (1 + eff_slip)   # BUY at ask
+                c_weight  = comp_weights.get(ticker, 0.0)
+                blended_w = 0.5 * k_weight + 0.5 * c_weight
 
-                pos_value = equity * self.cfg.fixed_size  # full 10% per position
-                shares      = pos_value / exec_price if exec_price > 0 else 0
+                blended_proba = min(
+                    raw_proba * (1.0 + blended_w * 0.1), 0.99
+                )
+
+                # Slippage (kept flexible for future extensions)
+                eff_slip   = self.cfg.base_slippage
+                exec_price = price * (1 + eff_slip)
+
+                pos_value = equity * self.cfg.fixed_size
+                shares    = pos_value / exec_price if exec_price > 0 else 0
 
                 if shares < 0.01:
                     continue
 
+                # ── BUY ──────────────────────────────────────────────────────
                 if blended_proba > self.cfg.buy_threshold and blended_w > 0.05:
                     if ticker not in portfolio.positions:
-                        portfolio.execute_trade(ticker, "BUY", pos_value,
-                                                exec_price, current_date)
+                        portfolio.execute_trade(
+                            ticker, "BUY", pos_value, exec_price, current_date
+                        )
                         self.trade_history.append({
-                            "date": current_date, "ticker": ticker,
-                            "action": "BUY", "proba": round(blended_proba, 4),
-                            "regime": regime_name, "weight": round(blended_w, 4),
-                            "price": round(exec_price, 2), "shares": round(shares, 4)
+                            "date": current_date,
+                            "ticker": ticker,
+                            "action": "BUY",
+                            "proba": round(blended_proba, 4),
+                            "regime": regime_name,
+                            "weight": round(blended_w, 4),
+                            "price": round(exec_price, 2),
+                            "shares": round(shares, 4),
+                            "window": window_idx,
                         })
 
+                # ── SELL ─────────────────────────────────────────────────────
                 elif blended_proba < self.cfg.sell_threshold:
                     if ticker in portfolio.positions:
-                        sell_price = price * (1 - eff_slip)   # SELL at bid
+                        sell_price  = price * (1 - eff_slip)
                         sell_shares = portfolio.positions[ticker]["shares"]
-                        portfolio.execute_trade(ticker, "SELL", sell_shares,
-                                                sell_price, current_date)
+
+                        portfolio.execute_trade(
+                            ticker, "SELL", sell_shares, sell_price, current_date
+                        )
                         self.trade_history.append({
-                            "date": current_date, "ticker": ticker,
-                            "action": "SELL", "proba": round(blended_proba, 4),
-                            "regime": regime_name, "weight": round(blended_w, 4),
-                            "price": round(sell_price, 2), "shares": round(sell_shares, 4)
+                            "date": current_date,
+                            "ticker": ticker,
+                            "action": "SELL",
+                            "proba": round(blended_proba, 4),
+                            "regime": regime_name,
+                            "weight": round(blended_w, 4),
+                            "price": round(sell_price, 2),
+                            "shares": round(sell_shares, 4),
+                            "window": window_idx,
                         })
 
-            # ── end of bar ────────────────────────────────────────────────
+            # ── end of bar ───────────────────────────────────────────────────
             portfolio.update_prices(daily_prices)
             portfolio.record_snapshot(current_date)
             prev_prices = {**daily_prices}
@@ -998,13 +1102,17 @@ class BacktestEngineV2:
                 "date":   current_date,
                 "equity": portfolio.get_portfolio_state()["total_equity"],
                 "regime": regime_name,
+                "window": window_idx,
             })
 
+            # ── logging ──────────────────────────────────────────────────────
             if bar_idx % 20 == 0:
                 state = portfolio.get_portfolio_state()
-                print(f"  📅 {current_date} | {regime_name:<18} | "
-                      f"Equity: ${state['total_equity']:>10,.0f} | "
-                      f"Heat: {state['heat']:.1%} | DD: {state['drawdown']:.1%}")
+                print(
+                    f"  📅 {current_date} | W{window_idx+1} | {regime_name:<16} | "
+                    f"Equity: ${state['total_equity']:>10,.0f} | "
+                    f"Heat: {state['heat']:.1%} | DD: {state['drawdown']:.1%}"
+                )
 
     # ── STEP 7: finalise & run all stress tests ───────────────────────────
 
@@ -1082,12 +1190,107 @@ class BacktestEngineV2:
 
         print("\n✅  Results saved to 5_backtesting/results/")
 
+# ── STANDALONE FUNCTION (must be at module level for multiprocessing) ──────
+def _retrain_window_worker(args: dict) -> dict:
+    """
+    Runs in a child process. Fully isolated — no shared state.
+    Returns dict with window_idx, model_path, metrics, signal_cache.
+    """
+    import os, sys, warnings
+    warnings.filterwarnings("ignore")
 
+    project_root = args["project_root"]
+    sys.path.insert(0, project_root)
+    sys.path.insert(0, os.path.join(project_root, "4_signals"))
+
+    window_idx  = args["window_idx"]
+    train_dates = args["train_dates"]
+    tickers     = args["tickers"]
+    end_date    = train_dates[-1]
+
+    # Unique model path per window — prevents file collision
+    model_path  = f"4_signals/xgboost_window_{window_idx:03d}.pkl"
+
+    print(f"  [W{window_idx+1}] Training on data up to {end_date} …")
+
+    try:
+        from xgboost_model import build_multi_ticker_dataset, train_xgboost
+        from signal_engine import SignalEngine
+
+        df = build_multi_ticker_dataset(
+            tickers      = tickers,
+            end_date     = end_date,
+            lookback_days = 730,
+            forward_days  = 5,
+        )
+
+        if df.empty:
+            print(f"  [W{window_idx+1}] ❌ Empty dataset")
+            return {"window_idx": window_idx, "model_path": None,
+                    "signal_cache": {}, "metrics": {}}
+
+        _, _, metrics = train_xgboost(
+            df,
+            save_path = model_path,
+            n_trials  = 5,
+        )
+
+        # Precompute signals using this window's model
+        engine = SignalEngine(model_path)
+        signal_cache = {}
+
+        import yfinance as yf
+        import pandas as pd
+        from datetime import datetime, timedelta
+
+        start_dt  = datetime.strptime(args["start_date"], "%Y-%m-%d")
+        ext_start = (start_dt - timedelta(days=420)).strftime("%Y-%m-%d")
+
+        for ticker in tickers:
+            try:
+                raw = yf.download(ticker, start=ext_start,
+                                  end=args["end_date"],
+                                  progress=False, auto_adjust=True)
+                if raw.empty:
+                    continue
+                if isinstance(raw.columns, pd.MultiIndex):
+                    raw.columns = raw.columns.get_level_values(0)
+                raw.columns = [c.lower() for c in raw.columns]
+                raw = raw[["open","high","low","close","volume"]].dropna()
+
+                df_reset = raw.copy().reset_index()
+                df_reset["date"] = df_reset["Date"].dt.strftime("%Y-%m-%d")
+
+                sig_df = engine.get_full_signals(df_reset, ticker)
+                if "proba_buy" in sig_df.columns:
+                    signal_cache[ticker] = sig_df.set_index("date")["proba_buy"].to_dict()
+
+            except Exception as e:
+                print(f"  [W{window_idx+1}] ⚠️ Signal fail {ticker}: {e}")
+
+        print(f"  [W{window_idx+1}] ✅ Done | "
+              f"Acc={metrics.get('wf_accuracy_mean', 0):.3f} | "
+              f"model={model_path}")
+
+        return {
+            "window_idx":   window_idx,
+            "model_path":   model_path,
+            "signal_cache": signal_cache,   # {ticker: {date: proba}}
+            "metrics":      metrics,
+        }
+
+    except Exception as e:
+        print(f"  [W{window_idx+1}] ❌ Worker failed: {e}")
+        return {"window_idx": window_idx, "model_path": None,
+                "signal_cache": {}, "metrics": {}}
 # ════════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    # Windows requires this guard for multiprocessing
+    from multiprocessing import freeze_support
+    freeze_support()
 
     cfg = BacktestConfig(
         tickers         = ["AAPL", "NVDA", "MSFT", "SPY", "QQQ", "TSLA"],
