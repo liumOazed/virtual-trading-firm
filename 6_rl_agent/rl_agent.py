@@ -220,7 +220,8 @@ class MultiAssetTradingEnv(gym.Env):
                  slippage:         float = 0.001,
                  sortino_weight:   float = 0.7,
                  sharpe_weight:    float = 0.3,
-                 reward_window:    int   = 10):
+                 reward_window:    int   = 10,
+                 step_every:       int   = 5):
 
         super().__init__()
         self.obs_matrix       = obs_matrix
@@ -236,6 +237,7 @@ class MultiAssetTradingEnv(gym.Env):
         self.sortino_w        = sortino_weight
         self.sharpe_w         = sharpe_weight
         self.reward_window    = reward_window
+        self.step_every       = step_every
 
         n_feat = obs_matrix.shape[1]
         self.observation_space = spaces.Box(
@@ -518,8 +520,8 @@ class RLTradingAgent:
             raise RuntimeError("Call build_model() first.")
 
         stop_cb = StopTrainingOnNoModelImprovement(
-            max_no_improvement_evals = 8,
-            min_evals                = 10,
+            max_no_improvement_evals = 20,
+            min_evals                = 30,
             verbose                  = 1,
         )
         eval_cb = EvalCallback(
@@ -727,14 +729,16 @@ if __name__ == "__main__":
 
     # ── 6. train ──────────────────────────────────────────────────────────
     agent.train(
-        total_timesteps = 200_000,
-        eval_freq       = 5_000,
+        total_timesteps = 500_000,
+        eval_freq       = 10_000,
         n_eval_episodes = 3,
     )
-
-    # ── 7. evaluate on OOS slice ──────────────────────────────────────────
+    
+    # ── 7. load best checkpoint + evaluate ───────────────────────────────
     print("\n📊 Evaluating on OOS slice …")
+    agent.load(f"{RL_DIR}/best_model/best_model")  # best OOS, not last checkpoint
     rl_df = agent.evaluate(deterministic=True)
+
 
     # ── 8. live inference demo ────────────────────────────────────────────
     print("\n🤖 Live inference demo (last window):")
