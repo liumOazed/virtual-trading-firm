@@ -63,6 +63,7 @@ desktop.ini
 *.db
 newsapi_quota.json
 *.tmp
+3_market_datalocal_indicators.py
 
 # ========================================
 # Other
