@@ -501,7 +501,8 @@ class StressTester:
         rows = []
 
         for label, start, end in self.cfg.stress_periods:
-            mask   = (equity_df["date"] >= start) & (equity_df["date"] <= end)
+            mask = (equity_df["date"] >= pd.Timestamp(start)) & \
+             (equity_df["date"] <= pd.Timestamp(end))
             period = equity_df[mask]
             if period.empty:
                 rows.append({"period": label, "note": "no data"}); continue
