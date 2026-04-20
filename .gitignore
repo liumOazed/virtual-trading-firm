@@ -29,6 +29,11 @@ ENV/
 5_backtesting/*.zip
 5_backtesting/*.log
 
+# ========================================
+# Benchmark in RL Agent
+# ========================================
+6_rl_agent/benchmark/
+
 # Ignore all CSV, PNG, ZIP files project-wide
 *.csv
 *.png
