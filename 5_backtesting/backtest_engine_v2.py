@@ -654,6 +654,7 @@ class BacktestEngineV2:
         self.regime_cache:  Dict[str, pd.Series]    = {}
         self.kalman_map:    Dict[str, KalmanEnsemble] = {}
         self.decay_results: Dict[str, Dict] = {}
+        self.window_sharpe_scores: Dict[int, float] = {}
         self.active_tickers: List[str] = list(self.cfg.tickers)
 
         # Results
@@ -766,6 +767,7 @@ class BacktestEngineV2:
                                        self.cfg.train_months,
                                        self.cfg.oos_months)
         windows    = wf_engine.windows()
+        self.window_sharpe_scores = {i: 0.0 for i in range(len(windows))}
         portfolio  = Portfolio(
             initial_capital=self.cfg.initial_capital,
             commission_rate=self.cfg.commission_rate
@@ -826,9 +828,26 @@ class BacktestEngineV2:
 
         # ── OOS LOOP ─────────────────────────────────────────────────────────
         self._run_oos_loop_v2(oos_dates_all, oos_date_to_window, portfolio)
+        
+        # ── compute per-window Sharpe scores (post OOS) ──────────────────────
+        for window_idx in set(e["window"] for e in self.equity_history):
 
+            w_rets = [
+                e for e in self.equity_history
+                if e.get("window") == window_idx
+            ]
+
+            if len(w_rets) > 5:
+                eq_vals = [e["equity"] for e in w_rets]
+                rets    = np.diff(eq_vals) / np.array(eq_vals[:-1])
+
+                w_sh = (rets.mean() / (rets.std() + 1e-9)) * np.sqrt(252)
+                self.window_sharpe_scores[window_idx] = float(w_sh)
+
+        # ── continue as normal ───────────────────────────────────────────────
         print("\n🏁 Walk-forward complete")
         self._finalise(portfolio)
+
 
     # ── retrain hook ──────────────────────────────────────────────────────
 
@@ -911,6 +930,11 @@ class BacktestEngineV2:
 
         prev_prices: Dict[str, float] = {}
         prev_window_idx: Optional[int] = None
+        
+        # ── kill-switch state ────────────────────────────────────────────
+        rolling_returns:   List[float] = []
+        halt_trading:      bool        = False
+        halt_resume_count: int         = 0
 
         for bar_idx, current_date in enumerate(oos_dates):
 
@@ -919,6 +943,14 @@ class BacktestEngineV2:
 
             # ── window selection ─────────────────────────────────────────────
             window_idx   = oos_date_to_window.get(current_date, 0)
+            # ── window quality weight (sigmoid Sharpe + recency) ─────────────
+            window_sharpe = self.window_sharpe_scores.get(window_idx - 1, 0.0)
+
+            max_w = max(self.window_sharpe_scores.keys() or [0])
+            recency_decay = 0.9 ** (max_w - window_idx)
+
+            window_quality = (1 / (1 + np.exp(-window_sharpe))) * recency_decay
+            window_quality = np.clip(window_quality, 0.3, 1.0)
             window_cache = self.window_signal_caches.get(window_idx, {})
 
             # Optional: reset Kalman when switching model regimes
@@ -958,6 +990,13 @@ class BacktestEngineV2:
 
             # ── no signals → just mark-to-market ─────────────────────────────
             if not bar_probas:
+                portfolio.update_prices(daily_prices)
+                portfolio.record_snapshot(current_date)
+                prev_prices = {**daily_prices}
+                continue
+            
+            # ── honor kill-switch ─────────────────────────────────────────────
+            if halt_trading:
                 portfolio.update_prices(daily_prices)
                 portfolio.record_snapshot(current_date)
                 prev_prices = {**daily_prices}
@@ -1038,7 +1077,11 @@ class BacktestEngineV2:
                     k_weight = 1.0 / n_sig
 
                 c_weight  = comp_weights.get(ticker, 0.0)
-                blended_w = 0.5 * k_weight + 0.5 * c_weight
+                blended_w = (
+                                0.35 * k_weight +
+                                0.35 * c_weight +
+                                0.30 * window_quality
+                            )
 
                 blended_proba = min(
                     raw_proba * (1.0 + blended_w * 0.1), 0.99
@@ -1048,7 +1091,13 @@ class BacktestEngineV2:
                 eff_slip   = self.cfg.base_slippage
                 exec_price = price * (1 + eff_slip)
 
-                pos_value = equity * self.cfg.fixed_size
+                regime_sharpes = {0: 2.63, 1: 0.5, 2: 2.06, 3: 0.5}
+                max_reg_sharpe = max(regime_sharpes.values())
+
+                regime_conf = regime_sharpes.get(regime, 0.5) / max_reg_sharpe
+                regime_conf = np.clip(regime_conf, 0.5, 1.0)
+
+                pos_value = equity * self.cfg.fixed_size * regime_conf
                 shares    = pos_value / exec_price if exec_price > 0 else 0
 
                 if shares < 0.01:
@@ -1104,6 +1153,42 @@ class BacktestEngineV2:
                 "regime": regime_name,
                 "window": window_idx,
             })
+            
+            # ── kill-switch update ────────────────────────────────────────────
+            bar_return = (
+                portfolio.get_portfolio_state()["total_equity"] /
+                max(
+                    self.equity_history[-2]["equity"]
+                    if len(self.equity_history) >= 2
+                    else self.cfg.initial_capital,
+                    1e-9
+                )
+            ) - 1
+
+            rolling_returns.append(bar_return)
+            if len(rolling_returns) > 20:
+                rolling_returns.pop(0)
+
+            if len(rolling_returns) >= 20:
+                roll_arr = np.array(rolling_returns)
+                roll_sh  = (roll_arr.mean() / (roll_arr.std() + 1e-9)) * np.sqrt(252)
+
+                peak_eq = max(e["equity"] for e in self.equity_history)
+                curr_eq = self.equity_history[-1]["equity"]
+                curr_dd = (peak_eq - curr_eq) / max(peak_eq, 1e-9)
+
+                if not halt_trading:
+                    if roll_sh < -1.0 and curr_dd > 0.03:
+                        halt_trading = True
+                        halt_resume_count = 0
+                        print(f"  🛑 KILL SWITCH FIRED {current_date} | "
+                            f"Roll Sharpe={roll_sh:.2f} | DD={curr_dd:.1%}")
+                else:
+                    halt_resume_count += 1
+                    if roll_sh > 0.5 and halt_resume_count >= 10:
+                        halt_trading = False
+                        print(f"  ✅ KILL SWITCH RELEASED {current_date} | "
+                            f"Roll Sharpe={roll_sh:.2f}")
 
             # ── logging ──────────────────────────────────────────────────────
             if bar_idx % 20 == 0:
