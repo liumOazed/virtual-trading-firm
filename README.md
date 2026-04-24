@@ -126,8 +126,8 @@ The system is designed for low-maintenance operation. The scheduler handles most
 
 | Task                       | Who               | When                   | Duration    |
 | -------------------------- | ----------------- | ---------------------- | ----------- |
-| Backtest retrain (XGBoost) | scheduler.py auto | 1st of month, 02:00    | ~2 hours    |
-| RL agent retrain           | Manual, Colab T4  | After backtest retrain | ~1 hour     |
+| Backtest retrain (XGBoost) | scheduler.py auto | 1st of month, 02:00    | ~8 hours    |
+| RL agent retrain           | Manual, Colab T4  | After backtest retrain | ~3 hour     |
 | Daily metrics refresh      | scheduler.py auto | Weekdays, 17:30        | ~30 seconds |
 | Daily Groq explainer       | scheduler.py auto | Weekdays, 18:00        | ~2 minutes  |
 
