@@ -15,8 +15,8 @@
 | `03_market_data_layer.md`   | 3. Market Data Layer            | Complete              |
 | `04_signal_generation.md`   | 4. Signal Generation            | Complete              |
 | `05_backtesting.md`         | 5. Backtesting Engine           | Complete              |
-| `06_rl_agent.md`            | 6. Reinforcement Learning Agent | Complete              |
-| `07_explainer.md`           | 7. Groq Explainer               | Complete              |
+| `06_rl_agent.md`            | 6. Reinforcement Learning Agent | Ongoing               |
+| `07_explainer.md`           | 7. Groq Explainer               | Ongoing               |
 
 ---
 
