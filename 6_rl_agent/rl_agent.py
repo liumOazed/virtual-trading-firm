@@ -73,6 +73,8 @@ class StateBuilder:
         "roll_vol_10",
         "roll_sharpe_10",
         "heat",
+        "kill_switch",      # ← 1 = halted, 0 = active
+        "window_quality",   # ← sigmoid-weighted window score
     ]
 
     TICKER_FEATURES = [
@@ -112,9 +114,27 @@ class StateBuilder:
         r                  = eq["daily_return"]
         eq["roll_vol_10"]  = r.rolling(10).std().fillna(0)
         eq["roll_sharpe_10"] = (
-            r.rolling(10).mean() /
-            r.rolling(10).std().clip(lower=1e-9)
+            r.rolling(10).mean() / r.rolling(10).std().clip(lower=1e-9)
         ).fillna(0) * np.sqrt(252)
+        
+        roll_sh = eq["roll_sharpe_10"]
+
+        # slope proxy
+        roll_sh_slope = roll_sh.rolling(10).mean() - roll_sh.rolling(20).mean()
+
+        dd = -eq["drawdown"]
+
+        eq["kill_switch"] = (
+            (roll_sh < -1.25) &
+            (dd > 0.04) &
+            (roll_sh_slope < 0)
+        ).astype(float)
+
+        if "window" in eq.columns:
+            base = 1 / (1 + np.exp(-roll_sh.clip(-3, 3)))
+            eq["window_quality"] = base.clip(0.3, 1.0)
+        else:
+            eq["window_quality"] = 0.5
 
         dates = eq["date"].tolist()
 
@@ -382,7 +402,7 @@ class GRUFeaturesExtractor(BaseFeaturesExtractor):
     def __init__(self,
                  observation_space: spaces.Box,
                  seq_len:    int   = 10,
-                 n_features: int   = 48,
+                 n_features: int   = 50,
                  gru_hidden: int   = 128,
                  gru_layers: int   = 1,
                  dropout:    float = 0.1):
