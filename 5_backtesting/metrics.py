@@ -571,6 +571,7 @@ def run_metrics(
                 if "regime" in eq.columns else pd.DataFrame()
     window_df = compute_window_metrics(eq, pnl_df) \
                 if "window" in eq.columns else pd.DataFrame()
+    
     rl_feats  = build_rl_features(core, trade, regime_df, window_df)
 
     bench = None
