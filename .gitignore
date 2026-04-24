@@ -81,3 +81,4 @@ TradingAgents/
 
 # Keep specific important files if needed (uncomment if you want to track them)
 # !TradingAgents/some_important_file.py3_market_datalocal_indicators.py
+6_rl_agent/eval_logs/
