@@ -130,11 +130,13 @@ class Portfolio:
 if __name__ == "__main__":
     port = Portfolio(initial_capital=100000, commission_rate=0.001)
     
-    port.execute_trade("AAPL", "BUY", size_pct=0.10, price=170.5, date_str="2026-04-15")
+    # BUY: size = 10% of initial capital = $10,000 worth of AAPL
+    port.execute_trade("AAPL", "BUY", size=10000, price=170.5, date_str="2026-04-15")
     port.update_prices({"AAPL": 175.2})
     port.record_snapshot("2026-04-16")
     
-    port.execute_trade("AAPL", "SELL", size_pct=1.0, price=178.0, date_str="2026-04-18")
+    # SELL: size = total value of position (sell all)
+    port.execute_trade("AAPL", "SELL", size=port.positions["AAPL"]["shares"] * 178.0, price=178.0, date_str="2026-04-18")
     port.record_snapshot("2026-04-18")
     
     print(port.get_portfolio_state())
