@@ -20,11 +20,83 @@
 
 ---
 
-## System Architecture Summary
+flowchart TB
+subgraph INFRA["🏗️ Infrastructure"]
+A1["venv (drive)"] --> A2["Google Drive sync"]
+A1 --> A3["Colab GPU bridge"]
+A4["TradingAgents cloned<br/>Groq patched into llm_clients"]
+end
+
+    subgraph DATA["📊 Market Data Layer"]
+        B1["local_indicators.py<br/>pandas-ta indicators"]
+        B2["finbert_sentiment.py<br/>FinBERT + NewsAPI/RSS"]
+        B3["kalman_risk.py<br/>Dynamic stop-loss"]
+        B4["advanced_price_features.py<br/>RWI · OU · QV · D/D · HJB"]
+    end
+
+    subgraph FEATURES["🔧 Feature Engineering"]
+        C1["feature_builder.py<br/>OHLCV + technical + fundamental"]
+    end
+
+    subgraph SIGNALS["⚡ Signal Generation"]
+        D1["rc_temporal.py<br/>Echo State Network"]
+        D2["xgboost_model.py<br/>6 tickers · Triple Barrier<br/>Optuna · SHAP"]
+        D3["signal_engine.py<br/>Orchestrator + sentiment overlay<br/>RL state vector"]
+    end
+
+    subgraph RL["🧠 Reinforcement Learning"]
+        E1["rl_agent.py<br/>SAC + GRU policy<br/>50-feature state<br/>Sortino/Sharpe reward"]
+        E2["benchmark.py<br/>SAC vs PPO vs A2C vs TD3"]
+        E3["Training: Colab T4 GPU<br/>~2.5h · 500k timesteps"]
+        E4["Inference: CPU<br/>best_model/best_model.zip"]
+    end
+
+    subgraph BACKTEST["📈 Backtesting Engine"]
+        F1["backtest_engine_v2.py<br/>Walk-forward · Regime detection<br/>Kalman ensemble · Filter competition<br/>Champion selection · Kill-switch<br/>Window quality weighting"]
+        F2["portfolio.py<br/>Position tracking · Equity curve<br/>Drawdown · Slippage"]
+        F3["metrics.py<br/>Sharpe · Sortino · Calmar · Omega<br/>VaR · CVaR · Per-regime breakdown<br/>5-panel tearsheet · RL features"]
+        F4["scheduler.py<br/>Monthly auto-retrain<br/>Daily explainer scheduling"]
+    end
+
+    subgraph EXPLAINER["📝 Groq Explainer"]
+        G1["groq_explainer.py<br/>Daily briefing · Trade audit<br/>Regime warning · Weekly summary<br/>Data freshness · Signal quality<br/>Model fallback chain"]
+    end
+
+    %% Flow connections
+    INFRA --> DATA
+    DATA --> FEATURES
+    FEATURES --> SIGNALS
+    SIGNALS --> RL
+    SIGNALS --> BACKTEST
+    RL --> BACKTEST
+    BACKTEST --> EXPLAINER
+    SIGNALS --> EXPLAINER
+
+    %% Styling
+    style INFRA fill:#1a1a2e,stroke:#16213e,color:#eee
+    style DATA fill:#0f3460,stroke:#16213e,color:#eee
+    style FEATURES fill:#533483,stroke:#16213e,color:#eee
+    style SIGNALS fill:#e94560,stroke:#16213e,color:#fff
+    style RL fill:#0b8457,stroke:#16213e,color:#eee
+    style BACKTEST fill:#2c3e50,stroke:#16213e,color:#eee
+    style EXPLAINER fill:#6c3483,stroke:#16213e,color:#eee
+
+# System Architecture
+
+| Layer                      | Components                                                                         |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| **Infrastructure**         | venv + Google Drive + Colab GPU + Groq-patched TradingAgents                       |
+| **Market Data**            | pandas-ta + FinBERT sentiment + Kalman risk + advanced features (RWI, OU, QV, HJB) |
+| **Signal Gen**             | Echo State Network + XGBoost (Optuna/SHAP) + sentiment overlay                     |
+| **Reinforcement Learning** | SAC + GRU (50-feature state), trained on T4 GPU, inference on CPU                  |
+| **Backtesting**            | Walk-forward, regime detection, Kalman ensemble, champion selection, kill-switch   |
+| **Explainer**              | Groq-powered daily briefings, trade audits, regime warnings, model fallback        |
+
+## System Architecture (Detailed)
 
 ```
 Section 1: Infrastructure
-    venv (D: drive) + Google Drive sync + Colab GPU bridge
+    venv (drive) + Google Drive sync + Colab GPU bridge
     TradingAgents cloned, Groq patched into llm_clients
 
 Section 2: Agent Architecture (superseded)
