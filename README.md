@@ -25,7 +25,7 @@
 ```mermaid
 flowchart TB
     subgraph INFRA["🏗️ Infrastructure"]
-        A1["venv (drive)"] --> A2["Google Drive sync"]
+        A1["venv (D: drive)"] --> A2["Google Drive sync"]
         A1 --> A3["Colab GPU bridge"]
         A4["TradingAgents cloned<br/>Groq patched into llm_clients"]
     end
@@ -47,13 +47,6 @@ flowchart TB
         D3["signal_engine.py<br/>Orchestrator + sentiment overlay<br/>RL state vector"]
     end
 
-    subgraph RL["🧠 Reinforcement Learning"]
-        E1["rl_agent.py<br/>SAC + GRU policy<br/>50-feature state<br/>Sortino/Sharpe reward"]
-        E2["benchmark.py<br/>SAC vs PPO vs A2C vs TD3"]
-        E3["Training: Colab T4 GPU<br/>~2.5h · 500k timesteps"]
-        E4["Inference: CPU<br/>best_model/best_model.zip"]
-    end
-
     subgraph BACKTEST["📈 Backtesting Engine"]
         F1["backtest_engine_v2.py<br/>Walk-forward · Regime detection<br/>Kalman ensemble · Filter competition<br/>Champion selection · Kill-switch<br/>Window quality weighting"]
         F2["portfolio.py<br/>Position tracking · Equity curve<br/>Drawdown · Slippage"]
@@ -61,27 +54,33 @@ flowchart TB
         F4["scheduler.py<br/>Monthly auto-retrain<br/>Daily explainer scheduling"]
     end
 
+    subgraph RL["🧠 Reinforcement Learning"]
+        E1["rl_agent.py<br/>SAC + GRU policy<br/>50-feature state<br/>Sortino/Sharpe reward"]
+        E2["benchmark.py<br/>SAC vs PPO vs A2C vs TD3"]
+        E3["Training: Colab T4 GPU<br/>~2.5h · 500k timesteps"]
+        E4["Inference: CPU<br/>best_model/best_model.zip"]
+    end
+
     subgraph EXPLAINER["📝 Groq Explainer"]
         G1["groq_explainer.py<br/>Daily briefing · Trade audit<br/>Regime warning · Weekly summary<br/>Data freshness · Signal quality<br/>Model fallback chain"]
     end
 
-    %% Flow connections
+    %% Flow connections (corrected order)
     INFRA --> DATA
     DATA --> FEATURES
     FEATURES --> SIGNALS
-    SIGNALS --> RL
     SIGNALS --> BACKTEST
-    RL --> BACKTEST
-    BACKTEST --> EXPLAINER
-    SIGNALS --> EXPLAINER
+    BACKTEST --> RL
+    RL --> EXPLAINER
+    SIGNALS -.->|"state vector only"| RL
 
     %% Styling
     style INFRA fill:#1a1a2e,stroke:#16213e,color:#eee
     style DATA fill:#0f3460,stroke:#16213e,color:#eee
     style FEATURES fill:#533483,stroke:#16213e,color:#eee
     style SIGNALS fill:#e94560,stroke:#16213e,color:#fff
-    style RL fill:#0b8457,stroke:#16213e,color:#eee
     style BACKTEST fill:#2c3e50,stroke:#16213e,color:#eee
+    style RL fill:#0b8457,stroke:#16213e,color:#eee
     style EXPLAINER fill:#6c3483,stroke:#16213e,color:#eee
 ```
 
