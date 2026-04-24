@@ -1,0 +1,26 @@
+VIRTUAL TRADING FIRM — DAILY REPORT
+Date: 2026-04-23 | Regime: Bull-Trending
+Model cutoff: 2025-03-28 (391 days ago)
+=======================================================
+
+[regime_warning]
+The high adversarial drift AUC of 1.000, exceeding the 0.70 threshold, and the model's staleness of 391 days since training to 2025-03-28, explicitly flag signal degradation and indicate potential unreliability of the system's predictions. The system continues to trade as the kill switch remains False, but the risk manager should closely monitor the situation, particularly the 20d rolling Sharpe of -0.647 and the 9.29% drawdown, for potential activation of the kill switch if these metrics worsen.
+
+[AAPL]
+The signal layer is indicating a WAIT/SELL decision, driven by a Hurst exponent of 0.479, suggesting a trending regime, with a buy probability of 0.7133, although the drift AUC of 1.0 flags the signal as degraded, reducing its reliability. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains inactive, as the Sharpe ratio is above the -1.25 threshold, and the current regime is Bull-Trending. Given the VERY LOW signal quality and degraded signal, the RL agent's allocation of 24.1% to AAPL appears cautious, likely reflecting the model's reduced confidence and the data freshness warning, which may indicate staleness in the model's training data.
+
+[NVDA]
+The signal layer is indicating a WAIT/SELL decision, driven by a Hurst exponent of 0.427, which suggests a mean-reverting regime, and a buy probability of 0.5542, although the drift AUC of 1.0 flags a degraded signal, reducing the reliability of this output. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains inactive, as the Sharpe ratio is above the -1.25 threshold, and thus the system's risk management is not yet triggered. Given the degraded signal quality and VERY LOW signal reliability due to market conditions far outside the training data, the RL agent's allocation of 14.2% to NVDA appears cautious, likely reflecting the model's uncertainty and the data freshness warning, which may indicate model staleness.
+
+[MSFT]
+The signal layer is indicating a WAIT/SELL decision, driven by a low buy probability of 0.4259, a Hurst exponent of 0.541 suggesting a trending regime, and a drift AUC of 1.0, which explicitly flags signal degradation and reduced reliability due to significant drift. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains inactive as the Sharpe ratio is not below -1.25, allowing the system to continue trading despite the caution warranted by the data freshness warning. The RL agent allocated 14.6% to MSFT, likely due to the Bull-Trending regime detection and the ESN signal of 0.0738, although the reliability of this allocation is reduced due to the VERY LOW signal quality and significant model staleness.
+
+[SPY]
+The signal layer is indicating a WAIT/SELL decision, driven by a low buy probability of 0.1568, a Hurst exponent of 0.378 suggesting a trending regime, and a drift AUC of 1.0, which explicitly flags signal degradation and reduced reliability due to market conditions far outside the training data. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains inactive as the Sharpe ratio is above the -1.25 threshold, allowing the system to continue trading. The RL agent allocated 14.5% to SPY, likely due to the Bull-Trending regime detection and the system's attempt to adapt to the current market conditions, despite the VERY LOW signal quality and DATA FRESHNESS WARNING, which may impact the reliability of this allocation decision.
+
+[QQQ]
+The signal layer is indicating a WAIT/SELL decision, driven by a low buy probability of 0.1361, a Hurst exponent of 0.398 suggesting a trending regime, and a drift AUC of 1.0, which explicitly flags signal degradation and reduced reliability due to market conditions far outside the training data. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains false, as the Sharpe ratio is not below -1.25, thus not triggering a trading halt. The RL agent allocated 22.7% to QQQ, likely due to the Bull-Trending regime detection and the agent's attempt to balance risk, despite the VERY LOW signal quality and data freshness warning, which reduces the reliability of this allocation decision.
+
+[TSLA]
+The signal layer is indicating a WAIT/SELL decision, driven by a low buy probability of 0.2811 and a high model confidence of 0.7189, with a Hurst exponent of 0.423 suggesting a trending regime, although the extremely high drift AUC of 1.0 flags a severely degraded signal. The portfolio context shows a drawdown of 9.29% and a 20d rolling Sharpe of -0.647, but the kill switch remains inactive, as the Sharpe ratio is above the -1.25 threshold, and the current regime is Bull-Trending. Given the VERY LOW signal quality and DATA FRESHNESS WARNING, the RL agent's allocation of 10.1% to TSLA should be treated with caution, as the model's reliability is reduced due to the significant drift and staleness of the training data.
+

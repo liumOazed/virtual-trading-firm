@@ -91,8 +91,8 @@ flowchart TB
 | **Infrastructure**         | venv + Google Drive + Colab GPU + Groq-patched TradingAgents                       |
 | **Market Data**            | pandas-ta + FinBERT sentiment + Kalman risk + advanced features (RWI, OU, QV, HJB) |
 | **Signal Gen**             | Echo State Network + XGBoost (Optuna/SHAP) + sentiment overlay                     |
-| **Reinforcement Learning** | SAC + GRU (50-feature state), trained on T4 GPU, inference on CPU                  |
 | **Backtesting**            | Walk-forward, regime detection, Kalman ensemble, champion selection, kill-switch   |
+| **Reinforcement Learning** | SAC + GRU (50-feature state), trained on T4 GPU, inference on CPU                  |
 | **Explainer**              | Groq-powered daily briefings, trade audits, regime warnings, model fallback        |
 
 ## System Architecture (Detailed)

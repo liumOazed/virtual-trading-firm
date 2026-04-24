@@ -117,17 +117,50 @@ class StateBuilder:
             r.rolling(10).mean() / r.rolling(10).std().clip(lower=1e-9)
         ).fillna(0) * np.sqrt(252)
         
-        roll_sh = eq["roll_sharpe_10"]
+        rets = eq["daily_return"]
 
-        # slope proxy
-        roll_sh_slope = roll_sh.rolling(10).mean() - roll_sh.rolling(20).mean()
+        rolling_returns = []
+        roll_sh = []
+        roll_sh_slope = []
+
+        for i in range(len(rets)):
+            rolling_returns.append(rets.iloc[i])
+            if len(rolling_returns) > 20:
+                rolling_returns.pop(0)
+
+            if len(rolling_returns) >= 20:
+                arr = np.array(rolling_returns)
+
+                # sharpe
+                sh = (arr.mean() / (arr.std() + 1e-9)) * np.sqrt(252)
+
+                # slope (REAL version — matches backtest)
+                first_half  = arr[:10]
+                second_half = arr[-10:]
+
+                sh_1 = (first_half.mean() / (first_half.std() + 1e-9)) * np.sqrt(252)
+                sh_2 = (second_half.mean() / (second_half.std() + 1e-9)) * np.sqrt(252)
+
+                slope = sh_2 - sh_1
+            else:
+                sh = 0.0
+                slope = 0.0
+
+            roll_sh.append(sh)
+            roll_sh_slope.append(slope)
+
+        eq["roll_sh"] = roll_sh
+        eq["roll_sh_slope"] = roll_sh_slope
+
+        # 🔧 FIX: convert back to pandas
+        roll_sh = eq["roll_sh"]
 
         dd = -eq["drawdown"]
 
         eq["kill_switch"] = (
-            (roll_sh < -1.25) &
+            (eq["roll_sh"] < -1.25) &
             (dd > 0.04) &
-            (roll_sh_slope < 0)
+            (eq["roll_sh_slope"] < 0)
         ).astype(float)
 
         if "window" in eq.columns:
@@ -322,7 +355,7 @@ class MultiAssetTradingEnv(gym.Env):
             reward -= dd * 5.0
 
         # 5. clip to [-1, 1]
-        return float(np.clip(reward / 10.0, -1.0, 1.0))
+        return float(np.clip(reward / 5.0, -1.0, 1.0))
 
     def step(self, action: np.ndarray):
         # ── skip non-rebalance bars (mark to market only) ─────────────────
@@ -351,9 +384,6 @@ class MultiAssetTradingEnv(gym.Env):
         action      = np.clip(action, 1e-6, None)
         new_weights = action / action.sum()
         prev_weights = self.weights.copy()
-        action      = np.clip(action, 1e-6, None)
-        new_weights = action / action.sum()
-        prev_weights = self.weights.copy()
 
         prices_now  = self.price_matrix[self.t]
         prices_prev = self.price_matrix[self.t - 1]
@@ -362,7 +392,8 @@ class MultiAssetTradingEnv(gym.Env):
         exec_prices = prices_now * (1 + self.slippage * slip_dir)  # noqa
 
         price_returns    = (prices_now / np.clip(prices_prev, 1e-9, None)) - 1
-        portfolio_return = float(np.dot(prev_weights, price_returns))
+        exec_returns = (exec_prices / np.clip(prices_prev, 1e-9, None)) - 1
+        portfolio_return = float(np.dot(prev_weights, exec_returns))
 
         self.equity      *= (1 + portfolio_return)
         self.peak_equity  = max(self.peak_equity, self.equity)
@@ -689,7 +720,8 @@ def load_backtest_outputs(
 
     price_df     = pd.concat(price_frames, axis=1)
     price_df     = price_df.reindex(dates).ffill().bfill().fillna(1.0)
-    price_matrix = (price_df / price_df.iloc[0]).values.astype(np.float32)
+    # price_matrix = (price_df / price_df.iloc[0]).values.astype(np.float32) # normalized
+    price_matrix = price_df.values.astype(np.float32)
 
     print(f"  ✅ price_matrix: {price_matrix.shape}")
     return obs_matrix, price_matrix, dates, n_features, sb
@@ -725,7 +757,7 @@ if __name__ == "__main__":
         buffer_size   = 100_000,
         gamma         = 0.95,      # less exploding rewards, more stable learning
         tau           = 0.01,      # was 0.005, faster target network update
-        ent_coef      = "auto",
+        ent_coef      = 0.01,
         device        = "auto",   # uses GPU if available
     )
 
