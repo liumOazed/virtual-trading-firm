@@ -20,12 +20,15 @@
 
 ---
 
+## System Architecture Flowchart
+
+```mermaid
 flowchart TB
-subgraph INFRA["🏗️ Infrastructure"]
-A1["venv (drive)"] --> A2["Google Drive sync"]
-A1 --> A3["Colab GPU bridge"]
-A4["TradingAgents cloned<br/>Groq patched into llm_clients"]
-end
+    subgraph INFRA["🏗️ Infrastructure"]
+        A1["venv (drive)"] --> A2["Google Drive sync"]
+        A1 --> A3["Colab GPU bridge"]
+        A4["TradingAgents cloned<br/>Groq patched into llm_clients"]
+    end
 
     subgraph DATA["📊 Market Data Layer"]
         B1["local_indicators.py<br/>pandas-ta indicators"]
@@ -80,6 +83,7 @@ end
     style RL fill:#0b8457,stroke:#16213e,color:#eee
     style BACKTEST fill:#2c3e50,stroke:#16213e,color:#eee
     style EXPLAINER fill:#6c3483,stroke:#16213e,color:#eee
+```
 
 # System Architecture
 
