@@ -22,9 +22,9 @@ ENV/
 # ========================================
 # Backtesting & Results (Most Important)
 # ========================================
-5_backtesting/results/
+5_backtesting/results/AAPL
 5_backtesting/*.csv
-5_backtesting/*.png
+# 5_backtesting/*.png
 5_backtesting/*.pkl
 5_backtesting/*.zip
 5_backtesting/*.log
@@ -36,7 +36,7 @@ ENV/
 
 # Ignore all CSV, PNG, ZIP files project-wide
 *.csv
-*.png
+# *.png
 *.zip
 
 # ========================================
@@ -72,4 +72,4 @@ newsapi_quota.json
 TradingAgents/
 
 # Keep specific important files if needed (uncomment if you want to track them)
-# !TradingAgents/some_important_file.py
+# !TradingAgents/some_important_file.py3_market_datalocal_indicators.py
