@@ -25,7 +25,7 @@
 ```mermaid
 flowchart TB
     subgraph INFRA["🏗️ Infrastructure"]
-        A1["venv (D: drive)"] --> A2["Google Drive sync"]
+        A1["venv (:drive)"] --> A2["Google Drive sync"]
         A1 --> A3["Colab GPU bridge"]
         A4["TradingAgents cloned<br/>Groq patched into llm_clients"]
     end
