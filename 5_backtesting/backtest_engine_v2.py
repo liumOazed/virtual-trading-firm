@@ -535,45 +535,85 @@ class StressTester:
 
     # ── 5h: Cost / slippage sweep ─────────────────────────────────────────
     def slippage_sweep(self, trades_df: pd.DataFrame,
-                       equity_start: float) -> pd.DataFrame:
+                   equity_start: float) -> pd.DataFrame:
         """
         Replays P&L from trade_log at different slippage levels.
-        Returns DataFrame with slippage → Sharpe / total_return.
+        Correct equity compounding + unbiased Sharpe.
         """
         if trades_df.empty:
             return pd.DataFrame()
 
         rows = []
+
         for slip in self.cfg.slippage_sweep:
             adj_trades = trades_df.copy()
-            # BUY: effective price higher by slippage
+
+            # ── apply slippage ─────────────────────────────
             buy_mask  = adj_trades["action"] == "BUY"
             sell_mask = adj_trades["action"] == "SELL"
+
             adj_trades.loc[buy_mask,  "price"] *= (1 + slip)
             adj_trades.loc[sell_mask, "price"] *= (1 - slip)
 
-            # Reconstruct simplified P&L
+            # ── P&L per trade ─────────────────────────────
             adj_trades["total"] = np.where(
                 adj_trades["action"] == "BUY",
                 -adj_trades["shares"] * adj_trades["price"],
-                 adj_trades["shares"] * adj_trades["price"]
+                adj_trades["shares"] * adj_trades["price"]
             )
-            adj_trades["total"] -= (adj_trades["shares"] * adj_trades["price"]
-                                    * self.cfg.commission_rate)
 
-            cum_pnl = adj_trades.groupby("date")["total"].sum().cumsum()
-            equity  = equity_start + cum_pnl
-            rets    = equity.pct_change().dropna()
+            # commission
+            adj_trades["total"] -= (
+                adj_trades["shares"] * adj_trades["price"]
+                * self.cfg.commission_rate
+            )
 
-            sharpe    = (rets.mean() / rets.std() * np.sqrt(252)
-                         if rets.std() > 1e-9 else 0)
-            total_ret = (equity.iloc[-1] / equity_start - 1
-                         if len(equity) > 0 else 0)
+            # ── daily aggregation ─────────────────────────
+            daily_pnl = adj_trades.groupby("date")["total"].sum()
+
+            # full business-day index (CRITICAL)
+            all_dates = pd.date_range(
+                start=adj_trades["date"].min(),
+                end=adj_trades["date"].max(),
+                freq="B"
+            )
+
+            daily_pnl = daily_pnl.reindex(
+                all_dates.strftime("%Y-%m-%d"),
+                fill_value=0.0
+            )
+
+            # ── equity curve (compounded properly) ────────
+            equity_curve = np.zeros(len(daily_pnl))
+            equity_curve[0] = equity_start
+
+            for i in range(1, len(daily_pnl)):
+                equity_curve[i] = equity_curve[i-1] + daily_pnl.iloc[i]
+
+            # ── sanity check ──────────────────────────────
+            if len(equity_curve) < 2:
+                rows.append({
+                    "slippage_pct": round(slip * 100, 3),
+                    "total_return": 0.0,
+                    "sharpe":       0.0,
+                })
+                continue
+
+            # ── TRUE returns (NO FILTERING) ───────────────
+            rets = np.diff(equity_curve) / np.maximum(equity_curve[:-1], 1e-9)
+
+            # ── Sharpe (unbiased) ─────────────────────────
+            if rets.std() < 1e-9:
+                sharpe = 0.0
+            else:
+                sharpe = (rets.mean() / rets.std()) * np.sqrt(252)
+
+            total_ret = (equity_curve[-1] / equity_start - 1)
 
             rows.append({
-                "slippage_pct":  round(slip * 100, 3),
-                "total_return":  round(total_ret * 100, 2),
-                "sharpe":        round(sharpe, 3),
+                "slippage_pct": round(slip * 100, 3),
+                "total_return": round(total_ret * 100, 2),
+                "sharpe":       round(sharpe, 3),
             })
 
         return pd.DataFrame(rows)
@@ -975,7 +1015,7 @@ class BacktestEngineV2:
                     ]
                 )
                 daily_prices[ticker] = price
-
+                
                 # ── signal lookup (window-aware fallback) ────────────────────
                 if window_cache and ticker in window_cache:
                     proba = window_cache[ticker].get(current_date, float("nan"))
@@ -987,6 +1027,13 @@ class BacktestEngineV2:
 
                 if not np.isnan(proba):
                     bar_probas[ticker] = proba
+            
+            # =================================================================
+            # 🔥 CRITICAL: These 3 lines MUST run EVERY bar
+            # =================================================================
+            portfolio.update_prices(daily_prices)
+            portfolio.record_snapshot(current_date)
+            prev_prices = {**daily_prices}
 
             # ── no signals → just mark-to-market ─────────────────────────────
             if not bar_probas:
@@ -995,12 +1042,6 @@ class BacktestEngineV2:
                 prev_prices = {**daily_prices}
                 continue
             
-            # ── honor kill-switch ─────────────────────────────────────────────
-            if halt_trading:
-                portfolio.update_prices(daily_prices)
-                portfolio.record_snapshot(current_date)
-                prev_prices = {**daily_prices}
-                continue
 
             # ── regime detection ─────────────────────────────────────────────
             proxy  = "SPY" if "SPY" in self.regime_cache else \
@@ -1058,89 +1099,89 @@ class BacktestEngineV2:
                 self.champion.record(
                     regime, ticker, competition_returns.get(ticker, 0.0)
                 )
+            if not halt_trading:
+                # ── trade execution ──────────────────────────────────────────────
+                equity = portfolio.get_portfolio_state()["total_equity"]
 
-            # ── trade execution ──────────────────────────────────────────────
-            equity = portfolio.get_portfolio_state()["total_equity"]
+                for i, ticker in enumerate(tickers_with_signal):
 
-            for i, ticker in enumerate(tickers_with_signal):
+                    price = daily_prices.get(ticker)
+                    if price is None:
+                        continue
 
-                price = daily_prices.get(ticker)
-                if price is None:
-                    continue
+                    raw_proba = bar_probas[ticker]
 
-                raw_proba = bar_probas[ticker]
+                    # Safe Kalman weight fallback
+                    if len(kalman_weights) == n_sig and n_sig > 0:
+                        k_weight = float(kalman_weights[i])
+                    else:
+                        k_weight = 1.0 / n_sig
 
-                # Safe Kalman weight fallback
-                if len(kalman_weights) == n_sig and n_sig > 0:
-                    k_weight = float(kalman_weights[i])
-                else:
-                    k_weight = 1.0 / n_sig
+                    c_weight  = comp_weights.get(ticker, 0.0)
+                    blended_w = (
+                                    0.35 * k_weight +
+                                    0.35 * c_weight +
+                                    0.30 * window_quality
+                                )
 
-                c_weight  = comp_weights.get(ticker, 0.0)
-                blended_w = (
-                                0.35 * k_weight +
-                                0.35 * c_weight +
-                                0.30 * window_quality
+                    blended_proba = min(
+                        raw_proba * (1.0 + blended_w * 0.1), 0.99
+                    )
+
+                    # Slippage (kept flexible for future extensions)
+                    eff_slip   = self.cfg.base_slippage
+                    exec_price = price * (1 + eff_slip)
+
+                    regime_sharpes = {0: 2.63, 1: 0.5, 2: 2.06, 3: 0.5}
+                    max_reg_sharpe = max(regime_sharpes.values())
+
+                    regime_conf = regime_sharpes.get(regime, 0.5) / max_reg_sharpe
+                    regime_conf = np.clip(regime_conf, 0.5, 1.0)
+
+                    pos_value = equity * self.cfg.fixed_size * regime_conf
+                    shares    = pos_value / exec_price if exec_price > 0 else 0
+
+                    if shares < 0.01:
+                        continue
+
+                    # ── BUY ──────────────────────────────────────────────────────
+                    if blended_proba > self.cfg.buy_threshold and blended_w > 0.05:
+                        if ticker not in portfolio.positions:
+                            portfolio.execute_trade(
+                                ticker, "BUY", pos_value, exec_price, current_date
                             )
+                            self.trade_history.append({
+                                "date": current_date,
+                                "ticker": ticker,
+                                "action": "BUY",
+                                "proba": round(blended_proba, 4),
+                                "regime": regime_name,
+                                "weight": round(blended_w, 4),
+                                "price": round(exec_price, 2),
+                                "shares": round(shares, 4),
+                                "window": window_idx,
+                            })
 
-                blended_proba = min(
-                    raw_proba * (1.0 + blended_w * 0.1), 0.99
-                )
+                    # ── SELL ─────────────────────────────────────────────────────
+                    elif blended_proba < self.cfg.sell_threshold:
+                        if ticker in portfolio.positions:
+                            sell_price  = price * (1 - eff_slip)
+                            sell_shares = portfolio.positions[ticker]["shares"]
 
-                # Slippage (kept flexible for future extensions)
-                eff_slip   = self.cfg.base_slippage
-                exec_price = price * (1 + eff_slip)
-
-                regime_sharpes = {0: 2.63, 1: 0.5, 2: 2.06, 3: 0.5}
-                max_reg_sharpe = max(regime_sharpes.values())
-
-                regime_conf = regime_sharpes.get(regime, 0.5) / max_reg_sharpe
-                regime_conf = np.clip(regime_conf, 0.5, 1.0)
-
-                pos_value = equity * self.cfg.fixed_size * regime_conf
-                shares    = pos_value / exec_price if exec_price > 0 else 0
-
-                if shares < 0.01:
-                    continue
-
-                # ── BUY ──────────────────────────────────────────────────────
-                if blended_proba > self.cfg.buy_threshold and blended_w > 0.05:
-                    if ticker not in portfolio.positions:
-                        portfolio.execute_trade(
-                            ticker, "BUY", pos_value, exec_price, current_date
-                        )
-                        self.trade_history.append({
-                            "date": current_date,
-                            "ticker": ticker,
-                            "action": "BUY",
-                            "proba": round(blended_proba, 4),
-                            "regime": regime_name,
-                            "weight": round(blended_w, 4),
-                            "price": round(exec_price, 2),
-                            "shares": round(shares, 4),
-                            "window": window_idx,
-                        })
-
-                # ── SELL ─────────────────────────────────────────────────────
-                elif blended_proba < self.cfg.sell_threshold:
-                    if ticker in portfolio.positions:
-                        sell_price  = price * (1 - eff_slip)
-                        sell_shares = portfolio.positions[ticker]["shares"]
-
-                        portfolio.execute_trade(
-                            ticker, "SELL", sell_shares, sell_price, current_date
-                        )
-                        self.trade_history.append({
-                            "date": current_date,
-                            "ticker": ticker,
-                            "action": "SELL",
-                            "proba": round(blended_proba, 4),
-                            "regime": regime_name,
-                            "weight": round(blended_w, 4),
-                            "price": round(sell_price, 2),
-                            "shares": round(sell_shares, 4),
-                            "window": window_idx,
-                        })
+                            portfolio.execute_trade(
+                                ticker, "SELL", sell_shares, sell_price, current_date
+                            )
+                            self.trade_history.append({
+                                "date": current_date,
+                                "ticker": ticker,
+                                "action": "SELL",
+                                "proba": round(blended_proba, 4),
+                                "regime": regime_name,
+                                "weight": round(blended_w, 4),
+                                "price": round(sell_price, 2),
+                                "shares": round(sell_shares, 4),
+                                "window": window_idx,
+                            })
 
             # ── end of bar ───────────────────────────────────────────────────
             portfolio.update_prices(daily_prices)
@@ -1172,23 +1213,39 @@ class BacktestEngineV2:
             if len(rolling_returns) >= 20:
                 roll_arr = np.array(rolling_returns)
                 roll_sh  = (roll_arr.mean() / (roll_arr.std() + 1e-9)) * np.sqrt(252)
+                # ── rolling Sharpe slope (trend of performance) ───────────────
+                if len(roll_arr) >= 20:   # keep consistent with your kill-switch window
+                    first_half  = roll_arr[:10]
+                    second_half = roll_arr[-10:]
+
+                    sh_1 = (first_half.mean() / (first_half.std() + 1e-9)) * np.sqrt(252)
+                    sh_2 = (second_half.mean() / (second_half.std() + 1e-9)) * np.sqrt(252)
+
+                    roll_sh_slope = sh_2 - sh_1
+                else:
+                    roll_sh_slope = 0.0
 
                 peak_eq = max(e["equity"] for e in self.equity_history)
                 curr_eq = self.equity_history[-1]["equity"]
                 curr_dd = (peak_eq - curr_eq) / max(peak_eq, 1e-9)
 
                 if not halt_trading:
-                    if roll_sh < -1.0 and curr_dd > 0.03:
+                    if roll_sh < -1.25 and curr_dd > 0.04:
                         halt_trading = True
                         halt_resume_count = 0
                         print(f"  🛑 KILL SWITCH FIRED {current_date} | "
                             f"Roll Sharpe={roll_sh:.2f} | DD={curr_dd:.1%}")
-                else:
+                # RELEASE
+                elif halt_trading:
                     halt_resume_count += 1
-                    if roll_sh > 0.5 and halt_resume_count >= 10:
+
+                    if (roll_sh > -0.1 and 
+                        roll_sh_slope > 0 and 
+                        halt_resume_count >= 5):
+
                         halt_trading = False
                         print(f"  ✅ KILL SWITCH RELEASED {current_date} | "
-                            f"Roll Sharpe={roll_sh:.2f}")
+                            f"Roll Sharpe={roll_sh:.2f} | Slope={roll_sh_slope:.4f}")
 
             # ── logging ──────────────────────────────────────────────────────
             if bar_idx % 20 == 0:
@@ -1380,7 +1437,7 @@ if __name__ == "__main__":
     cfg = BacktestConfig(
         tickers         = ["AAPL", "NVDA", "MSFT", "SPY", "QQQ", "TSLA"],
         start_date      = "2020-01-01",
-        end_date        = "2025-04-01",
+        end_date        = "2026-04-01",
         initial_capital = 100_000,
         train_months    = 12,
         oos_months      = 2,
