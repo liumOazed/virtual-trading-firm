@@ -57,7 +57,7 @@ Section 6: Reinforcement Learning Agent
     rl_agent.py                 SAC + GRU policy, 50-feature state space,
                                 Sortino/Sharpe hybrid reward, step_every=5
     benchmark.py                SAC vs PPO vs A2C vs TD3 side-by-side comparison
-    Training: Colab T4 GPU (~1 hour per run, 500k timesteps)
+    Training: Colab T4 GPU (~2.5 hour per run, 500k timesteps)
     Inference: CPU, loaded from best_model/best_model.zip
 
 Section 7: Groq Explainer
