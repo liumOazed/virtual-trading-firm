@@ -65,6 +65,14 @@ newsapi_quota.json
 *.tmp
 3_market_datalocal_indicators.py
 
+
+# **Note:** `eval_logs/` and `tb_logs/` are excluded from version control (see `.gitignore`).
+# RL agent logs (excluded from repo)
+6_rl_agent/eval_logs/
+6_rl_agent/tb_logs/
+**/eval_logs/
+**/tb_logs/
+
 # ========================================
 # Other
 # ========================================
