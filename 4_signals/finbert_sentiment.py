@@ -208,8 +208,8 @@ def get_sentiment_local(headlines: list) -> float:
         try:
             result = pipe(h)
             label = result[0]["label"].lower()
-            val = scores.append(label_map.get(label, 0.0))
-            print(f"[Sub-Score {i+1}] {val:+.2f} | {h[:50]}...") 
+            val = label_map.get(label, 0.0)
+            print(f"[Sub-Score {i+1}] {val:+.2f} | {h[:50]}...")
             scores.append(val)
         except:
             continue
@@ -259,8 +259,8 @@ def fetch_headlines(ticker: str, date_str: str) -> list:
                 print(f"   ✅ NewsAPI: {len(newsapi_h)} headlines")
                 return list(set(newsapi_h))
 
-        except Exception as e:
-            print(f"   ⚠️ NewsAPI failed: {e}")
+        except Exception:
+            pass   # NewsAPI unavailable — RSS fallback will handle it
 
     # =========================
     # 2. RSS FALLBACK (LAST 48H)

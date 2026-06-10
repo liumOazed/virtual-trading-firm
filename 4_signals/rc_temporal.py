@@ -19,7 +19,7 @@ class EchoStateNetwork:
         reservoir_size: int = 200,
         spectral_radius: float = 0.9,
         sparsity: float = 0.1,
-        input_scaling: float = 0.5,
+        input_scaling: float = 1.0,
         leak_rate: float = 0.3,
         random_state: int = 42,
     ):
@@ -60,6 +60,9 @@ class EchoStateNetwork:
             W = W * (self.spectral_radius / sr)
         self.W_res = W
 
+        new_sr = float(np.max(np.abs(np.linalg.eigvals(self.W_res))))
+        print(f"  ESN spectral radius: {new_sr:.4f}")
+
     def _run_reservoir(self, X: np.ndarray) -> np.ndarray:
         """
         Drive reservoir with input sequence X.
@@ -68,6 +71,8 @@ class EchoStateNetwork:
         n_steps  = len(X)
         states   = np.zeros((n_steps, self.reservoir_size))
         state    = np.zeros(self.reservoir_size)
+        # local RNG seeded from self.random_state — isolates from global np.random
+        _rng = np.random.RandomState(self.random_state)
 
         for t in range(n_steps):
             u = np.array([[X[t]]])
@@ -79,6 +84,7 @@ class EchoStateNetwork:
                 (1 - self.leak_rate) * state +
                 self.leak_rate * np.tanh(pre_activation)
             )
+            state = state + _rng.normal(0, 0.001, state.shape)
             states[t] = state
 
         return states
@@ -87,13 +93,31 @@ class EchoStateNetwork:
         """
         Train on price series and binary labels (1=up, 0=down).
         """
-        # Normalize prices
-        prices_norm = self.scaler.fit_transform(
-            prices.reshape(-1, 1)
-        ).flatten()
+        # Convert to log-returns — drives reservoir more diversely than price levels
+        log_returns = np.diff(np.log(prices + 1e-8))
+        log_returns = np.concatenate([[0.0], log_returns])
+        returns_norm = (log_returns - log_returns.mean()) / (log_returns.std() + 1e-8)
+        returns_norm = np.clip(returns_norm, -5.0, 5.0)
 
         # Run reservoir
-        states = self._run_reservoir(prices_norm)
+        states = self._run_reservoir(returns_norm)
+
+        # ESN reservoir health diagnostics
+        _sr_actual   = float(np.max(np.abs(np.linalg.eigvals(self.W_res))))
+        _std_dims    = states.std(axis=0)
+        _rank_est    = np.linalg.matrix_rank(states, tol=1e-6)
+        _cov_res     = np.cov(states.T)
+        _eigvals_res = np.sort(np.real(np.linalg.eigvalsh(_cov_res)))[::-1]
+        _total_v     = _eigvals_res.sum() + 1e-12
+        _top8_pct    = _eigvals_res[:8].sum() / _total_v * 100
+        print(f"\n  ESN Reservoir Diagnostics ({len(prices)} training bars):")
+        print(f"    Spectral radius (actual): {_sr_actual:.4f}  (target 0.85–0.99)")
+        print(f"    States std — mean: {_std_dims.mean():.6f}  min: {_std_dims.min():.6f}  (want >0.1)")
+        print(f"    Matrix rank: {_rank_est}  (want ~{self.reservoir_size})")
+        print(f"    Top-8 eigenvalues capture: {_top8_pct:.1f}% of variance  (want 40–70%)")
+        print(f"    Top-20 eigenvalues: {np.round(_eigvals_res[:20], 4).tolist()}")
+        print(f"    returns_norm range: [{returns_norm.min():.4f}, {returns_norm.max():.4f}]  std: {returns_norm.std():.4f}")
+        print(f"    prices (raw) range: [{prices.min():.2f}, {prices.max():.2f}]")
 
         # Drop warmup period (first 50 steps)
         warmup   = 50
@@ -104,8 +128,8 @@ class EchoStateNetwork:
         self.readout.fit(states, labels)
         self.is_fitted = True
 
-        # Training accuracy
-        preds = self.readout.predict(states)
+        # Training accuracy (use decision_function to avoid classes_ dependency)
+        preds = (self.readout.decision_function(states) > 0).astype(int)
         acc   = accuracy_score(labels, preds)
         return acc
 
@@ -117,24 +141,92 @@ class EchoStateNetwork:
         if not self.is_fitted:
             raise RuntimeError("ESN not fitted yet. Call fit() first.")
 
-        prices_norm = self.scaler.transform(
-            prices.reshape(-1, 1)
-        ).flatten()
+        prices = np.asarray(prices)
 
-        states = self._run_reservoir(prices_norm)
+        log_returns = np.diff(np.log(prices + 1e-8))
+        log_returns = np.concatenate([[0.0], log_returns])
+        returns_norm = (log_returns - log_returns.mean()) / (log_returns.std() + 1e-8)
+        returns_norm = np.clip(returns_norm, -5.0, 5.0)
+
+        states = self._run_reservoir(returns_norm)
         last_state = states[-1].reshape(1, -1)
 
-        signal     = self.readout.predict(last_state)[0]
-        # Confidence via decision function distance from boundary
+        # Use decision_function directly to avoid classes_ attribute access
+        # (sklearn >= 1.7 RidgeClassifier.predict() accesses self.classes_,
+        # which breaks when loading pkl files from sklearn 1.6.x)
         decision   = self.readout.decision_function(last_state)[0]
+        signal     = 1 if decision > 0 else 0
         confidence = float(np.tanh(abs(decision)))  # 0 to 1
 
         return {
-            "signal":     int(signal),        # 1=BUY 0=SELL
-            "confidence": round(confidence, 4),
-            "decision":   round(float(decision), 4),
-            "label":      "BUY" if signal == 1 else "SELL",
+            "signal":          int(signal),        # 1=BUY 0=SELL
+            "confidence":      round(confidence, 4),
+            "decision":        round(float(decision), 4),
+            "label":           "BUY" if signal == 1 else "SELL",
+            "reservoir_state": last_state.flatten(),  # shape (reservoir_size,)
         }
+        
+    def run_full_series(self, prices: np.ndarray) -> list:
+        """
+        Run ESN once over the entire series and return
+        per-step predictions efficiently.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("ESN not fitted yet. Call fit() first.")
+
+        prices = np.asarray(prices)
+
+        log_returns = np.diff(np.log(prices + 1e-8))
+        log_returns = np.concatenate([[0.0], log_returns])
+        returns_norm = (log_returns - log_returns.mean()) / (log_returns.std() + 1e-8)
+        returns_norm = np.clip(returns_norm, -5.0, 5.0)
+
+        states = self._run_reservoir(returns_norm)
+
+        decisions = self.readout.decision_function(states)
+        signals = (decisions > 0).astype(int)
+
+        results = []
+
+        for i in range(len(states)):
+            decision = decisions[i]
+            confidence = float(np.tanh(abs(decision)))
+
+            results.append({
+                "signal": int(signals[i]),
+                "confidence": round(confidence, 4),
+                "decision": round(float(decision), 4),
+                "label": "BUY" if signals[i] == 1 else "SELL",
+            })
+
+        return results
+        
+        
+
+    def get_reservoir_state(self, prices: np.ndarray) -> np.ndarray:
+        """
+        Drive the reservoir with prices and return the last state vector.
+        Shape: (reservoir_size,).  Does not require labels — inference only.
+        """
+        if not self.is_fitted:
+            raise RuntimeError("ESN not fitted yet. Call fit() first.")
+        prices = np.asarray(prices)
+        log_returns = np.diff(np.log(prices + 1e-8))
+        log_returns = np.concatenate([[0.0], log_returns])
+        returns_norm = (log_returns - log_returns.mean()) / (log_returns.std() + 1e-8)
+        returns_norm = np.clip(returns_norm, -5.0, 5.0)
+        states = self._run_reservoir(returns_norm)
+        return states[-1]
+
+    def get_reservoir_state_pca(self, prices: np.ndarray, pca,
+                                 n_components: int = 8) -> np.ndarray:
+        """
+        Return PCA-compressed last reservoir state.
+        pca must be a fitted sklearn PCA object.
+        Shape: (n_components,).
+        """
+        state = self.get_reservoir_state(prices)
+        return pca.transform(state.reshape(1, -1)).flatten()[:n_components]
 
     def save(self, path: str):
         joblib.dump({
@@ -179,7 +271,7 @@ def train_esn(
         reservoir_size  = 200,
         spectral_radius = 0.95,
         sparsity        = 0.1,
-        input_scaling   = 0.5,
+        input_scaling   = 1.0,
         leak_rate       = 0.3,
     )
 

@@ -178,9 +178,15 @@ def build_features(
     # Drop ONLY rows that have critical NaNs (technical + label), keep fundamentals as NaN
     critical_cols = ["close", "rsi_14", "atr_14", "label"]
     df = df.dropna(subset=critical_cols)
-    
+
     # Fill remaining NaNs (fundamentals) with 0 or median
     df = df.fillna(0.0)
+
+    # Move DatetimeIndex → "date" column so it survives pd.concat(ignore_index=True).
+    # HMM and InflationSignalEngine both require a "date" column with real timestamps.
+    if not isinstance(df.index, pd.RangeIndex):
+        df = df.reset_index()
+        df.columns = [c.lower() for c in df.columns]
 
     print(f"   ✅ Feature matrix: {df.shape[0]} rows × {df.shape[1]} cols")
     return df

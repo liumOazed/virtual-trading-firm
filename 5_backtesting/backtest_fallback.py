@@ -574,17 +574,6 @@ class BacktestEngineV2:
         self.trade_history:       List[Dict] = []
         self._oos_sell_log:       List[Dict] = []
         self._oos_cache_miss_log: List[Dict] = []
-        self._rl_callback   = None     # set via set_rl_callback() — default disabled
-        self._rl_signal_log = []       # records every signal for RL training
-
-    def set_rl_callback(self, callback):
-        """
-        Register an RL callback that fires before each BUY execution.
-        callback(state_dict) -> float multiplier in [0.5, 1.5]
-        If callback is None (default), engine runs as today (100-102%).
-        """
-        self._rl_callback = callback
-        self._rl_signal_log = []
 
     def prepare(self):
         # ── FIX-1: seed set as very first operation ────────────────
@@ -1403,33 +1392,6 @@ class BacktestEngineV2:
                 }.get(ticker, 1.0)
 
                 pos_value = equity * _regime_size * _ticker_mult
-                # ── RL callback hook (inert when _rl_callback is None) ─────────────
-                _rl_mult = 1.0
-                if self._rl_callback is not None:
-                    _rl_state = {
-                        "ticker":           ticker,
-                        "confidence":       float(blended_proba),
-                        "hmm_regime":       hmm_regime,
-                        "heat":             float(_bar_heat),
-                        "drawdown":         float(_bar_dd),
-                        "regime_bar_count": int(_regime_bar_count),
-                        "n_open":           len(portfolio.positions),
-                        "pos_value_base":   float(pos_value),
-                        "equity":           float(equity),
-                        "current_date":     current_date,
-                    }
-                    try:
-                        _rl_mult = float(self._rl_callback(_rl_state))
-                        _rl_mult = max(0.5, min(_rl_mult, 1.5))
-                    except Exception:
-                        _rl_mult = 1.0
-                    self._rl_signal_log.append({
-                        **_rl_state,
-                        "rl_mult":         _rl_mult,
-                        "final_pos_value": float(pos_value * _rl_mult),
-                    })
-                pos_value = pos_value * _rl_mult
-                # ────────────────────────────────────────────────────────────────────
                 shares    = pos_value / exec_price if exec_price > 0 else 0
                 if shares < 0.01:
                     continue

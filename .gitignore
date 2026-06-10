@@ -12,34 +12,6 @@ env/
 ENV/
 
 # ========================================
-# Models & Large Files
-# ========================================
-*.pkl
-*.joblib
-*.h5
-*.onnx
-
-# ========================================
-# Backtesting & Results (Most Important)
-# ========================================
-5_backtesting/results/AAPL
-5_backtesting/*.csv
-# 5_backtesting/*.png
-5_backtesting/*.pkl
-5_backtesting/*.zip
-5_backtesting/*.log
-
-# ========================================
-# Benchmark in RL Agent
-# ========================================
-6_rl_agent/benchmark/
-
-# Ignore all CSV, PNG, ZIP files project-wide
-*.csv
-# *.png
-*.zip
-
-# ========================================
 # IDE & Editor Files
 # ========================================
 .vscode/
@@ -47,6 +19,11 @@ ENV/
 *.swp
 *.swo
 *~
+
+# ========================================
+# Claude Code Settings
+# ========================================
+.claude/
 
 # ========================================
 # OS Generated Files
@@ -57,28 +34,76 @@ desktop.ini
 *.ini
 
 # ========================================
-# Logs & Temporary Data
+# Models & Large Binary Files
+# ========================================
+*.pkl
+*.joblib
+*.h5
+*.onnx
+
+# ========================================
+# Logs & Temporary Files
 # ========================================
 *.log
 *.db
-newsapi_quota.json
 *.tmp
-3_market_datalocal_indicators.py
+*.bak
+*BLOAT*
+_unicode_hits.txt
+newsapi_quota.json
 
+# ========================================
+# Data & Spreadsheet Files
+# ========================================
+*.csv
+*.zip
+*.gsheet
 
-# **Note:** `eval_logs/` and `tb_logs/` are excluded from version control (see `.gitignore`).
-# RL agent logs (excluded from repo)
-6_rl_agent/eval_logs/
-6_rl_agent/tb_logs/
+# ========================================
+# Jupyter Notebooks (generated/scratch)
+# ========================================
+*.ipynb
+*.ipynb.bak
+
+# ========================================
+# Test Folders & Scratch Files
+# ========================================
+**/test/
+alpaca_test.py
+
+# ========================================
+# Backtesting Runtime Output
+# ========================================
+5_backtesting/results/
+
+# ========================================
+# RL Agent (untracked entirely)
+# ========================================
+6_rl_agent/
 **/eval_logs/
 **/tb_logs/
 
 # ========================================
-# Other
+# Explainer Cache & Reports
 # ========================================
-# If you want to ignore the entire TradingAgents folder:
-TradingAgents/
+7_explainer/cache/
+7_explainer/reports/
 
-# Keep specific important files if needed (uncomment if you want to track them)
-# !TradingAgents/some_important_file.py3_market_datalocal_indicators.py
-6_rl_agent/eval_logs/
+# ========================================
+# Market Data Cache
+# ========================================
+3_market_data/cache/
+
+# ========================================
+# Agent Memory
+# ========================================
+2_agents/memory/
+
+# ========================================
+# Untracked Bloat / Archive Folders
+# ========================================
+TradingAgents/
+Growth/
+9_aria_growth/
+_docs_v1/
+8_docs_v1/

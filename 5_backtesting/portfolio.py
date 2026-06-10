@@ -30,7 +30,7 @@ class Portfolio:
         """Execute a trade for a given ticker and action (BUY or SELL)."""
         if action.upper() == "BUY":
             if ticker not in self.positions:
-                self.positions[ticker] = {"shares": 0.0, "avg_price": 0.0, "current_price": 0.0, "last_updated": None}
+                self.positions[ticker] = {"shares": 0.0, "avg_price": 0.0, "current_price": 0.0, "last_updated": None, "entry_date": date_str}
             old_shares = self.positions[ticker]["shares"]
             old_avg = self.positions[ticker]["avg_price"]
             new_shares = size / price
@@ -119,11 +119,13 @@ class Portfolio:
         total_return = (equity_curve['equity'].iloc[-1] / self.initial_capital) - 1
         sharpe = returns.mean() / returns.std() * np.sqrt(252) if returns.std() != 0 else 0
         
+        peak         = equity_curve['equity'].cummax()
+        max_drawdown = ((equity_curve['equity'] - peak) / peak).min()
+
         return {
             "total_return": round(total_return * 100, 2),
             "sharpe_ratio": round(sharpe, 3),
-            "max_drawdown": round(max((self.peak_equity - e['equity']) / self.peak_equity 
-                                    for e in self.equity_history) * 100, 2),
+            "max_drawdown": round(max_drawdown * 100, 2),
             "num_trades": len(self.trade_history)
         }
         
