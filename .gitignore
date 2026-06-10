@@ -104,6 +104,7 @@ alpaca_test.py
 # ========================================
 TradingAgents/
 Growth/
-9_aria_growth/
+9_aria_growth/*
+!9_aria_growth/*.py
 _docs_v1/
 8_docs_v1/
