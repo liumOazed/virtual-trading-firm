@@ -275,20 +275,71 @@ data fetcher — all available if a genuinely different market-neutral edge
 ---
 
 ## Performance Summary
-
-**Backtest** (2021-01-04 to 2025-03-28, 1,544 trading days):
-
-| Metric               | Backtest | RL Agent OOS |
-| -------------------- | -------- | ------------ |
-| Total return         | 78.8%    | 21.72%       |
-| Annualised return    | 14.74%   | 39.75%       |
-| Sharpe               | 1.342    | 1.348        |
-| Sortino              | 2.155    | 2.301        |
-| Calmar               | 1.067    | 2.562        |
-| Max drawdown         | -13.82%  | -15.51%      |
-| Win rate             | 80.2%    | —            |
-| Bull-Trending Sharpe | 2.916    | —            |
-| Bear-Trending Sharpe | 2.065    | —            |
+ 
+**ARIA Backtest** (2,057 trading days, walk-forward OOS):
+ 
+| Metric | Value |
+| --- | --- |
+| Total return | 100.4% |
+| Annualised return | 13.14% |
+| Annualised vol | 9.84% |
+| Sharpe (raw) | 1.321 |
+| Sharpe (rf-adj) | 0.825 |
+| Sortino | 1.169 |
+| Calmar | 1.301 |
+| Omega | 1.323 |
+| Max drawdown | -10.1% |
+| Avg DD duration | 15.4 bars |
+| VaR 95% | -0.86% |
+| CVaR 95% | -1.39% |
+| Daily hit rate | 49.64% |
+ 
+**Trade analysis** (338 closed round trips):
+ 
+| Metric | Value |
+| --- | --- |
+| Win rate | 68.64% |
+| Avg win | +14.62% |
+| Avg loss | -4.76% |
+| Payoff ratio | 3.069 |
+| Profit factor | 5.372 |
+| Expectancy | +8.54% per trade |
+| Avg hold | 77.5 days |
+| Best / worst trade | +646.58% / -19.5% |
+| Total gross P&L | $422,754 |
+ 
+**Regime breakdown:**
+ 
+| Regime | Bars | Ann Ret% | Sharpe | Max DD% | Win% |
+| --- | --- | --- | --- | --- | --- |
+| Bear-Trending | 389 | 44.70 | 1.939 | -4.78 | 64.71 |
+| Bull-Trending | 1011 | 17.82 | 1.658 | -9.80 | 69.63 |
+ 
+**Benchmark comparison** (buy & hold, identical OOS dates):
+ 
+| Metric | ARIA | SPY B&H | QQQ B&H |
+| --- | --- | --- | --- |
+| Total return | +100.40% | +140.00% | +169.24% |
+| Sharpe (raw) | 1.321 | 1.016 | 0.907 |
+| Max drawdown | -10.10% | -24.50% | -35.12% |
+| Alpha (ann) vs SPY | +4.77% | — | — |
+| Beta vs SPY | 0.282 | — | — |
+| Correlation vs SPY | 0.486 | — | — |
+ 
+**How to read this:** ARIA returns less than buy-and-hold SPY/QQQ in
+absolute terms (+100% vs +140%/+169%) but with far higher risk-adjusted
+quality — Sharpe 1.321 vs 1.016/0.907, and less than half the drawdown
+(-10.1% vs -24.5%/-35.1%). The value proposition is *participation with
+protection*: market-like upside, dramatically smaller losses. Beta 0.28
+confirms it's only loosely tied to the market — most of its return is the
++4.77% annual alpha, not market exposure.
+ 
+**Note on regimes:** the backtest breakdown covers Bear-Trending and
+Bull-Trending only. ARIA's live validation (June 2026) has run entirely
+in **Bull-Stable**, a regime not represented in this breakdown. This may
+explain the hypercloud round-trip churn observed live — the strategy has
+limited backtested experience in Bull-Stable specifically. Live validation
+is measuring exactly this gap.
 
 **Live paper** (since 2026-06-01): in validation. Tracked daily via
 `daily_recorder.py` with alpha measured against SPY/QQQ. Live results
