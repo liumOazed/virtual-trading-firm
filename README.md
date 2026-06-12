@@ -39,6 +39,44 @@ reliability, and building complementary strategies.
 
 ---
 
+## ⚠ Critical Finding — Backtest Regime Coverage Gap (June 2026)
+
+**ARIA has zero backtested performance in the Bull-Stable regime — the
+exact regime it has been trading live in since June 1.**
+
+Investigation of the backtest results (2,057 days) found the HMM only ever
+classified the test window as **Bull-Trending (1,011 bars)** or
+**Bear-Trending (389 bars)**. The other two HMM states — **Bull-Stable**
+and **Bear-Stress** — _never triggered once_ across the entire backtest.
+
+Implications, in order of importance:
+
+1. **The 100.4% / Sharpe 1.32 backtest was earned entirely in two trending
+   regimes.** ARIA's behavior in Bull-Stable is completely unvalidated.
+2. **Live trading went straight into Bull-Stable and stayed there.** So the
+   live results (the hypercloud churn, the trapped positions, the early
+   drawdown) are ARIA's _first-ever_ data in this regime — not
+   underperformance vs the backtest, but behavior the backtest never tested.
+3. **The trapped-exit bug was structurally invisible to backtesting.** It
+   only triggers when a held position's sector gets gated out — which
+   happens in Bull-Stable, a regime the backtest never entered. This is why
+   it surfaced only in live trading.
+4. **Open question:** why did the HMM never produce Bull-Stable in 2,057
+   historical days, yet immediately classify the live market as Bull-Stable
+   and hold it for 2+ weeks? Possible: the backtest period genuinely lacked
+   choppy regimes; OR the live HMM sees a different feature distribution than
+   training (a form of drift). Unresolved — worth investigating.
+   **Action items from this finding:**
+
+- Run a targeted backtest over a historically choppy/sideways period (where
+  the HMM produces Bull-Stable) to finally measure ARIA there.
+- Treat current live results as _regime-extension data_, not backtest
+  underperformance — you cannot underperform a regime that was never tested.
+- The retrain (when run) should include recent Bull-Stable periods so the
+  models gain actual exposure to this regime.
+
+---
+
 ## Contents
 
 | File                      | Section                              | Status                |
@@ -275,65 +313,65 @@ data fetcher — all available if a genuinely different market-neutral edge
 ---
 
 ## Performance Summary
- 
+
 **ARIA Backtest** (2,057 trading days, walk-forward OOS):
- 
-| Metric | Value |
-| --- | --- |
-| Total return | 100.4% |
-| Annualised return | 13.14% |
-| Annualised vol | 9.84% |
-| Sharpe (raw) | 1.321 |
-| Sharpe (rf-adj) | 0.825 |
-| Sortino | 1.169 |
-| Calmar | 1.301 |
-| Omega | 1.323 |
-| Max drawdown | -10.1% |
-| Avg DD duration | 15.4 bars |
-| VaR 95% | -0.86% |
-| CVaR 95% | -1.39% |
-| Daily hit rate | 49.64% |
- 
+
+| Metric            | Value     |
+| ----------------- | --------- |
+| Total return      | 100.4%    |
+| Annualised return | 13.14%    |
+| Annualised vol    | 9.84%     |
+| Sharpe (raw)      | 1.321     |
+| Sharpe (rf-adj)   | 0.825     |
+| Sortino           | 1.169     |
+| Calmar            | 1.301     |
+| Omega             | 1.323     |
+| Max drawdown      | -10.1%    |
+| Avg DD duration   | 15.4 bars |
+| VaR 95%           | -0.86%    |
+| CVaR 95%          | -1.39%    |
+| Daily hit rate    | 49.64%    |
+
 **Trade analysis** (338 closed round trips):
- 
-| Metric | Value |
-| --- | --- |
-| Win rate | 68.64% |
-| Avg win | +14.62% |
-| Avg loss | -4.76% |
-| Payoff ratio | 3.069 |
-| Profit factor | 5.372 |
-| Expectancy | +8.54% per trade |
-| Avg hold | 77.5 days |
+
+| Metric             | Value             |
+| ------------------ | ----------------- |
+| Win rate           | 68.64%            |
+| Avg win            | +14.62%           |
+| Avg loss           | -4.76%            |
+| Payoff ratio       | 3.069             |
+| Profit factor      | 5.372             |
+| Expectancy         | +8.54% per trade  |
+| Avg hold           | 77.5 days         |
 | Best / worst trade | +646.58% / -19.5% |
-| Total gross P&L | $422,754 |
- 
+| Total gross P&L    | $422,754          |
+
 **Regime breakdown:**
- 
-| Regime | Bars | Ann Ret% | Sharpe | Max DD% | Win% |
-| --- | --- | --- | --- | --- | --- |
-| Bear-Trending | 389 | 44.70 | 1.939 | -4.78 | 64.71 |
-| Bull-Trending | 1011 | 17.82 | 1.658 | -9.80 | 69.63 |
- 
+
+| Regime        | Bars | Ann Ret% | Sharpe | Max DD% | Win%  |
+| ------------- | ---- | -------- | ------ | ------- | ----- |
+| Bear-Trending | 389  | 44.70    | 1.939  | -4.78   | 64.71 |
+| Bull-Trending | 1011 | 17.82    | 1.658  | -9.80   | 69.63 |
+
 **Benchmark comparison** (buy & hold, identical OOS dates):
- 
-| Metric | ARIA | SPY B&H | QQQ B&H |
-| --- | --- | --- | --- |
-| Total return | +100.40% | +140.00% | +169.24% |
-| Sharpe (raw) | 1.321 | 1.016 | 0.907 |
-| Max drawdown | -10.10% | -24.50% | -35.12% |
-| Alpha (ann) vs SPY | +4.77% | — | — |
-| Beta vs SPY | 0.282 | — | — |
-| Correlation vs SPY | 0.486 | — | — |
- 
+
+| Metric             | ARIA     | SPY B&H  | QQQ B&H  |
+| ------------------ | -------- | -------- | -------- |
+| Total return       | +100.40% | +140.00% | +169.24% |
+| Sharpe (raw)       | 1.321    | 1.016    | 0.907    |
+| Max drawdown       | -10.10%  | -24.50%  | -35.12%  |
+| Alpha (ann) vs SPY | +4.77%   | —        | —        |
+| Beta vs SPY        | 0.282    | —        | —        |
+| Correlation vs SPY | 0.486    | —        | —        |
+
 **How to read this:** ARIA returns less than buy-and-hold SPY/QQQ in
 absolute terms (+100% vs +140%/+169%) but with far higher risk-adjusted
 quality — Sharpe 1.321 vs 1.016/0.907, and less than half the drawdown
-(-10.1% vs -24.5%/-35.1%). The value proposition is *participation with
-protection*: market-like upside, dramatically smaller losses. Beta 0.28
+(-10.1% vs -24.5%/-35.1%). The value proposition is _participation with
+protection_: market-like upside, dramatically smaller losses. Beta 0.28
 confirms it's only loosely tied to the market — most of its return is the
 +4.77% annual alpha, not market exposure.
- 
+
 **Note on regimes:** the backtest breakdown covers Bear-Trending and
 Bull-Trending only. ARIA's live validation (June 2026) has run entirely
 in **Bull-Stable**, a regime not represented in this breakdown. This may
@@ -421,15 +459,18 @@ forced. Killing a bad strategy is a successful outcome.
 
 ## Known Issues (current)
 
-| Issue                                                                                                           | Status                                                                                          |
-| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Trapped exits: held positions can't sell when their sector is gated out (e.g. TSLA in autos during Bull-Stable) | Open — fix: evaluate held positions vs sell threshold regardless of sector-active               |
-| Fill price logs as 0 if order fills slower than retry window                                                    | Mitigated — retry loop + loud warning; next-run reconciliation is the bulletproof fix if needed |
-| FinBERT returns identical sentiment across tickers                                                              | Disabled in live; ticker-specific feed + retrain planned                                        |
-| Hypercloud round-trip churn in Bull-Stable (buy ~0.55, sell ~0.40 days later)                                   | Monitoring — surfaced during live validation                                                    |
-| COVID crash / 2018 Q4 stress tests return NaN                                                                   | Outside current backtest date range                                                             |
-| ARIA-Growth not historically validated (current-snapshot screen)                                                | By design — monthly archive building point-in-time data for an EDGAR backtest                   |
-| ARIA-Growth regime detection lags (200dma) — slow to de-risk in fast crash                                      | Mitigated by 15% per-stock stop; thresholds editable, to be tuned in backtest                   |
+| Issue                                                                                                                                                                         | Status                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **Backtest never entered Bull-Stable or Bear-Stress** — ARIA is trading live in an untested regime (Bull-Stable). 100% backtest earned only in Bull-Trending + Bear-Trending. | Open — needs targeted backtest over a choppy historical period; see Critical Finding above      |
+| Trapped exits: held positions can't sell when their sector is gated out (e.g. TSLA in autos during Bull-Stable)                                                               | Open — fix: evaluate held positions vs sell threshold regardless of sector-active               |
+| Fill price logs as 0 if order fills slower than retry window                                                                                                                  | Mitigated — retry loop + loud warning; next-run reconciliation is the bulletproof fix if needed |
+| FinBERT returns identical sentiment across tickers                                                                                                                            | Disabled in live; ticker-specific feed + retrain planned                                        |
+| Hypercloud round-trip churn in Bull-Stable (buy ~0.55, sell ~0.40 days later)                                                                                                 | Monitoring — consistent with untested-regime behavior (see Critical Finding)                    |
+| Drift gate is a stub — `regime_selector.py` reads `drift_auc` from signal_cache but nothing computes/writes it, so it defaults to 0.5 (gate never fires)                      | Open — drift producer never built; gate is dead code. Build post-validation if needed           |
+| AVGO Tier 3 / TSLA blacklist in regime_selector.py, yet both held live                                                                                                        | Open — suggests live engine may not apply selector tier gates; investigate                      |
+| COVID crash / 2018 Q4 stress tests return NaN                                                                                                                                 | Outside current backtest date range                                                             |
+| ARIA-Growth not historically validated (current-snapshot screen)                                                                                                              | By design — monthly archive building point-in-time data for an EDGAR backtest                   |
+| ARIA-Growth regime detection lags (200dma) — slow to de-risk in fast crash                                                                                                    | Mitigated by 15% per-stock stop; thresholds editable, to be tuned in backtest                   |
 
 ---
 
