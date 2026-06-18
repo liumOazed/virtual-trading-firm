@@ -55,8 +55,15 @@ def _ensure():
         with open(HIST_CSV,"w",newline="") as f: csv.writer(f).writerow(COLS)
 
 def _append(row):
-    with open(HIST_CSV,"a",newline="") as f:
-        csv.writer(f).writerow([row.get(c,"") for c in COLS])
+    import pandas as pd
+    today = row.get("date", "")
+    if not os.path.exists(HIST_CSV):
+        with open(HIST_CSV, "w", newline="") as f:
+            csv.writer(f).writerow(COLS)
+    df = pd.read_csv(HIST_CSV, encoding="utf-8-sig")
+    df = df[df["date"].astype(str) != today]   # drop same-day row if present
+    new_row = pd.DataFrame([[row.get(c, "") for c in COLS]], columns=COLS)
+    pd.concat([df, new_row], ignore_index=True).to_csv(HIST_CSV, index=False)
 
 def _close_on(ticker, on_date):
     """Daily close on/just before a date (handles weekends/holidays)."""

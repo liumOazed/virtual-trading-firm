@@ -103,6 +103,8 @@ class BacktestConfig:
     ticker_buy_thresholds:  Dict[str, float] = field(default_factory=lambda: {})
     ticker_sell_thresholds: Dict[str, float] = field(default_factory=lambda: {})
 
+    min_hold_bars:   int   = 3
+
     base_slippage:   float = 0.001
     commission_rate: float = 0.001
     random_seed:     int   = 42
@@ -971,7 +973,7 @@ class BacktestEngineV2:
                     _prev_hmm_regime != "Bull-Trending"):
                 _last_bull_bar = bar_idx
 
-            if hmm_regime in ("Bear-Trending", "Bear-Stress"):
+            if hmm_regime in ("Bear-Stress", "Bear-Stable"):
                 _bear_confirm_count += 1
             else:
                 _bear_duration_bars = _bear_confirm_count
@@ -1113,7 +1115,7 @@ class BacktestEngineV2:
                         key=lambda x: x[1],
                     )
                     for _trim_tkr, _ in _trim_candidates:
-                        if _trim_tkr == "TSLA" and hmm_regime not in ("Bear-Trending", "Bear-Stress"):
+                        if _trim_tkr == "TSLA" and hmm_regime not in ("Bear-Trending","Bear-Stress"):
                             continue
                         if portfolio.get_portfolio_state().get(
                             "heat", 0.0
@@ -1389,8 +1391,8 @@ class BacktestEngineV2:
                     )
                 else:
                     _regime_size = (
-                        0.12 if hmm_regime == "Bull-Stable"   else
-                        0.10 if hmm_regime == "Bear-Trending" else
+                        0.12 if hmm_regime == "Bull-Stable"              else
+                        0.10 if hmm_regime in ("Bear-Stress", "Bear-Stable") else
                         0.08
                     )
                 # Cap raised 0.20 -> 0.26 so confirmed-trend sizing (0.22)
@@ -1565,23 +1567,29 @@ class BacktestEngineV2:
                             "hmm_regime":      hmm_regime,
                         })
                     if ticker in portfolio.positions:
-                        sell_price  = price * (1 - eff_slip)
-                        sell_shares = portfolio.positions[ticker]["shares"]
-                        portfolio.execute_trade(
-                            ticker, "SELL", sell_shares,
-                            sell_price, current_date
-                        )
-                        self.trade_history.append({
-                            "date":       current_date,
-                            "ticker":     ticker,
-                            "action":     "SELL",
-                            "proba":      round(blended_proba, 4),
-                            "regime":     regime_name,
-                            "hmm_regime": hmm_regime,
-                            "weight":     round(blended_w, 4),
-                            "price":      round(sell_price, 2),
-                            "shares":     round(sell_shares, 4),
-                        })
+                        _held       = _bars_held.get(ticker, 0)
+                        _entry_px   = portfolio.positions[ticker]["avg_price"]
+                        _profitable = price > _entry_px
+                        if _held < self.cfg.min_hold_bars and _profitable:
+                            pass  # winning + too new → hold (stop profit-churn)
+                        else:
+                            sell_price  = price * (1 - eff_slip)
+                            sell_shares = portfolio.positions[ticker]["shares"]
+                            portfolio.execute_trade(
+                                ticker, "SELL", sell_shares,
+                                sell_price, current_date
+                            )
+                            self.trade_history.append({
+                                "date":       current_date,
+                                "ticker":     ticker,
+                                "action":     "SELL",
+                                "proba":      round(blended_proba, 4),
+                                "regime":     regime_name,
+                                "hmm_regime": hmm_regime,
+                                "weight":     round(blended_w, 4),
+                                "price":      round(sell_price, 2),
+                                "shares":     round(sell_shares, 4),
+                            })
 
             # trend-add: pyramid into winners after 10 bars / 5%+ gain
             if hmm_regime == "Bull-Trending":
@@ -1630,9 +1638,10 @@ class BacktestEngineV2:
             prev_prices = {**daily_prices}
 
             self.equity_history.append({
-                "date":   current_date,
-                "equity": portfolio.get_portfolio_state()["total_equity"],
-                "regime": regime_name,
+                "date":         current_date,
+                "equity":       portfolio.get_portfolio_state()["total_equity"],
+                "regime":       hmm_regime,   # HMM label — drives the breakdown
+                "hurst_regime": regime_name,  # old Hurst label, kept for reference
             })
 
             self._oos_sell_log       = sell_log

@@ -144,24 +144,28 @@ def close_position(h, symbol):
 # PLAN COMPUTATION  (pure function — unit-testable, no network)
 # ══════════════════════════════════════════════════════════════════════════════
 def compute_plan(target_dollars: dict, current_mv: dict, drift_thresh: float,
-                 stopped: set = None, redistribute: bool = False):
+                 stopped: set = None, redistribute: bool = False,
+                 close_reasons: dict = None):
     """
     target_dollars : {symbol: desired $ exposure}  (survivors only — stopped &
                      blocklisted names already excluded by the caller)
     current_mv     : {symbol: current market value $}
-    stopped        : symbols to close as STOP-LOSS this cycle
-    redistribute   : if True (a stop fired), top survivors UP to target even on
+    stopped        : symbols to force-close + redistribute this cycle (stops/drops)
+    close_reasons  : optional {symbol: reason} override for the close label
+                     (e.g. manual drop vs stop-loss), for clean trade-log records
+    redistribute   : if True (a removal fired), top survivors UP to target even on
                      small drift (this spreads freed cash evenly); winners ABOVE
                      target are still never trimmed below drift_thresh.
     Returns list of actions: (symbol, side, notional, reason).
     """
     stopped = stopped or set()
+    close_reasons = close_reasons or {}
     actions = []
-    # 1) Stop-losses first (close the breakers)
+    # 1) Forced closes first (stops + manual drops)
     for sym in stopped:
         if sym in current_mv:
-            actions.append((sym, "close", current_mv[sym],
-                            f"STOP-LOSS (-{STOP_LOSS_PCT:.0%} from entry)"))
+            reason = close_reasons.get(sym, f"STOP-LOSS (-{STOP_LOSS_PCT:.0%} from entry)")
+            actions.append((sym, "close", current_mv[sym], reason))
     # 2) Exits: held, not in target, not already stopped
     for sym, mv in current_mv.items():
         if sym not in target_dollars and sym not in stopped:
@@ -242,6 +246,11 @@ def main():
                     help="clear the stop-loss blocklist (run after a monthly re-screen)")
     ap.add_argument("--stop-pct", type=float, default=STOP_LOSS_PCT,
                     help=f"stop-loss threshold from entry (default {STOP_LOSS_PCT})")
+    ap.add_argument("--drop", nargs="+", metavar="TICKER", default=None,
+                    help="manually close & blocklist one or more held names, "
+                         "redistributing their cash evenly to survivors "
+                         "(e.g. --drop LLY  or  --drop LLY NVDA). Stays out until "
+                         "--reset-stops after a re-screen.")
     args = ap.parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -252,10 +261,10 @@ def main():
     # ── HARD GUARD: refuse to run on the wrong account (protects ARIA) ──
     if EXPECTED_ACCOUNT and acct_num != EXPECTED_ACCOUNT:
         print("=" * 70)
-        print("  [GUARD] ACCOUNT GUARD TRIPPED - refusing to run.")
+        print("  ⛔ ACCOUNT GUARD TRIPPED — refusing to run.")
         print(f"     Connected to account {acct_num}, but this book must run on")
         print(f"     {EXPECTED_ACCOUNT} (Zed2/growth). Your keys are pointing at the")
-        print(f"     WRONG account - likely ARIA's. No orders were touched.")
+        print(f"     WRONG account — likely ARIA's. No orders were touched.")
         print(f"     Fix: ensure 9_aria_growth/.env has the Zed2 keys, and that no")
         print(f"     ALPACA_API_KEY is exported in this shell overriding it.")
         print("=" * 70)
@@ -266,7 +275,7 @@ def main():
     cur_mv = {s: float(p["market_value"]) for s, p in positions.items()}
 
     print("=" * 70)
-    print("  ARIA-Growth - Paper Executor" + ("  [STATUS]" if args.status else
+    print("  ARIA-Growth — Paper Executor" + ("  [STATUS]" if args.status else
           "  [EXECUTE]" if args.execute else "  [DRY-RUN]"))
     print("=" * 70)
     print(f"  Account {acct_num} | equity ${equity:,.0f} | cash ${float(acct['cash']):,.0f} | "
@@ -293,16 +302,16 @@ def main():
     else:
         info = detect_regime()
         regime = info["regime"]
-        print(f"\n  [SPY] {info['spy']} | trend {info['trend_vs_200dma_pct']:+.1f}% | "
+        print(f"\n  📡 SPY {info['spy']} | trend {info['trend_vs_200dma_pct']:+.1f}% | "
               f"vol {info['realized_vol_pct']}% | dd {info['drawdown_from_high_pct']:+.1f}% "
-              f"-> {regime}")
+              f"→ {regime}")
     print(f"  Style: {REGIME_STYLE[regime]}")
 
     # ---- Regime-flip detection ----
     prev = json.loads(STATE_FILE.read_text()) if STATE_FILE.exists() else {}
     flipped = prev.get("regime") and prev["regime"] != regime
     if flipped:
-        print(f"\n  [FLIP] REGIME: {prev['regime']} -> {regime}  (full rotation)")
+        print(f"\n  🔄 REGIME FLIP: {prev['regime']} → {regime}  (full rotation)")
 
     # ---- Stop-loss detection + blocklist ----
     # A held name down ≥ stop_pct from entry (Alpaca's unrealized_plpc) stops out.
@@ -310,7 +319,7 @@ def main():
     # flip or via --reset-stops (run that after a monthly re-screen).
     blocklist = set() if (flipped or args.reset_stops) else set(prev.get("blocklist", []))
     if args.reset_stops:
-        print(f"\n  [reset] Stop-loss blocklist cleared (--reset-stops).")
+        print(f"\n  ♻ Stop-loss blocklist cleared (--reset-stops).")
 
     stopped = set()
     for s, p in positions.items():
@@ -321,31 +330,48 @@ def main():
         if plpc <= -abs(args.stop_pct):
             stopped.add(s)
     if stopped:
-        print(f"\n  [STOP] STOP-LOSS triggered ({args.stop_pct:.0%} from entry): "
+        print(f"\n  🛑 STOP-LOSS triggered ({args.stop_pct:.0%} from entry): "
               f"{', '.join(sorted(stopped))}")
-    blocklist |= stopped       # stopped names join the blocklist
 
-    # ---- Build target (survivors only: exclude blocklisted/stopped) ----
+    # Manual drops: treated like stop-outs (close + blocklist + even redistribute).
+    # Only act on names actually held; warn on the rest.
+    dropped = set()
+    if args.drop:
+        req = {t.strip().upper() for t in args.drop}
+        dropped = {t for t in req if t in positions}
+        not_held = req - dropped
+        if dropped:
+            print(f"\n  ✋ MANUAL DROP: {', '.join(sorted(dropped))} "
+                  f"(closed, blocklisted, cash redistributed evenly)")
+        if not_held:
+            print(f"  ⚠ --drop ignored (not currently held): {', '.join(sorted(not_held))}")
+
+    removed = stopped | dropped          # both close + redistribute the same way
+    blocklist |= removed                 # and both join the blocklist
+
+    # ---- Build target (survivors only: exclude blocklisted/stopped/dropped) ----
     deploy_dollars = args.deploy * equity
     target, port = load_target(regime, args.screen, args.n, args.max_per_sector,
                                deploy_dollars, exclude=blocklist)
     if not target:
-        print("\n  [!] No stocks passed the regime filter.")
+        print("\n  ✗ No stocks passed the regime filter.")
         return
     per = deploy_dollars / len(port)
     extra = ""
     if blocklist:
-        extra = f" | {len(blocklist)} name(s) blocklisted (stopped): {', '.join(sorted(blocklist))}"
+        extra = f" | {len(blocklist)} blocklisted: {', '.join(sorted(blocklist))}"
     print(f"\n  Target: {len(port)} survivors, ${per:,.0f} each "
           f"(deploy {args.deploy:.0%} of equity){extra}")
-    if stopped:
-        print(f"  [+] Freed cash from {len(stopped)} stop(s) redistributed EVENLY "
+    if removed:
+        print(f"  → Freed cash from {len(removed)} removal(s) redistributed EVENLY "
               f"across {len(port)} survivors.")
 
+    close_reasons = {t: "MANUAL DROP" for t in dropped}
     plan = compute_plan(target, cur_mv, REBALANCE_DRIFT,
-                        stopped=stopped, redistribute=bool(stopped))
+                        stopped=removed, redistribute=bool(removed),
+                        close_reasons=close_reasons)
     if not plan:
-        print("\n  [ok] Account already matches target - no action needed.")
+        print("\n  ✓ Account already matches target — no action needed.")
         _save_state(regime, target, blocklist)
         return
 
@@ -372,10 +398,10 @@ def main():
             else:
                 place_order(h, sym, notional, side)
                 res = "ok"
-            print(f"    [ok] {side.upper()} {sym} ${notional:,.0f}")
+            print(f"    ✓ {side.upper()} {sym} ${notional:,.0f}")
         except Exception as e:
             res = f"ERROR: {e}"
-            print(f"    [err] {side.upper()} {sym}: {e}")
+            print(f"    ✗ {side.upper()} {sym}: {e}")
         log_rows.append({"timestamp": datetime.now(timezone.utc).isoformat(),
                          "regime": regime, "symbol": sym, "side": side,
                          "notional": round(notional, 2), "reason": reason, "result": res})
@@ -386,7 +412,7 @@ def main():
         new = pd.concat([pd.read_csv(TRADE_LOG), new], ignore_index=True)
     new.to_csv(TRADE_LOG, index=False)
     _save_state(regime, target, blocklist)
-    print(f"\n  [done] Logged {len(log_rows)} actions -> {TRADE_LOG}")
+    print(f"\n  ✓ Logged {len(log_rows)} actions → {TRADE_LOG}")
 
 
 def _save_state(regime, target, blocklist=None):

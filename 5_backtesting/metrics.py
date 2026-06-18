@@ -131,7 +131,8 @@ def build_trade_pnl(trades: pd.DataFrame) -> pd.DataFrame:
                     "gross_pnl":   round(gross,  4),
                     "pnl_pct":     round(pnl_pct, 6),
                     "days_held":   d_held,
-                    "regime":      buy_row.get("regime", "Unknown"),
+                    "regime":      buy_row.get("hmm_regime",
+                                              buy_row.get("regime", "Unknown")),
                     "weight":      buy_row.get("weight",  0.0),
                 }
                 if has_window:
@@ -195,7 +196,7 @@ def compute_core_metrics(eq: pd.DataFrame,
     best_30d   = float(roll_sh.max())
     daily_hit  = float((rets > 0).mean())
 
-    return {
+    metrics = {
         "total_return":      round(total_ret * 100, 2),
         "annualized_return": round(ann_ret   * 100, 2),
         "annualized_vol":    round(ann_vol   * 100, 2),
@@ -213,6 +214,15 @@ def compute_core_metrics(eq: pd.DataFrame,
         "daily_hit_rate":    round(daily_hit * 100, 2),
         "days_traded":       days,
     }
+
+    import json, os
+    _out = os.path.join(os.path.dirname(__file__), "results", "metrics.json")
+    os.makedirs(os.path.dirname(_out), exist_ok=True)
+    with open(_out, "w") as f:
+        json.dump(metrics, f, indent=2)
+    print(f"  metrics saved -> {_out}")
+
+    return metrics
 
 
 # ════════════════════════════════════════════════════════════════════════════

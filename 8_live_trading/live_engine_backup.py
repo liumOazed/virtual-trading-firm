@@ -52,8 +52,6 @@ LIVE_TRADE_LOG= os.path.join(LIVE_DIR, "live_trade_log.csv")
 LIVE_EQUITY   = os.path.join(LIVE_DIR, "live_equity_curve.csv")
 STATE_FILE    = os.path.join(LIVE_DIR, "live_state.json")
 REGIME_STATE  = os.path.join(LIVE_DIR, "regime_state.json")
-HOLD_STATE    = os.path.join(LIVE_DIR, "position_hold_state.json")
-MIN_HOLD_BARS = 3   # must match BacktestConfig.min_hold_bars
 os.makedirs(LIVE_DIR, exist_ok=True)
 
 
@@ -71,21 +69,6 @@ def _load_regime_state() -> dict:
 def _save_regime_state(state: dict):
     with open(REGIME_STATE, "w") as f:
         json.dump(state, f)
-
-
-def _load_hold_state() -> dict:
-    if os.path.exists(HOLD_STATE):
-        try:
-            with open(HOLD_STATE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-
-def _save_hold_state(state: dict):
-    with open(HOLD_STATE, "w") as f:
-        json.dump(state, f, indent=2)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -210,24 +193,13 @@ class PositionReconciler:
                 order = self.client.close_position(ticker)
                 if order is None:
                     order = {}
+                # Ensure the logger has what it needs
                 order.setdefault("ticker", ticker)
                 order.setdefault("side", "sell")
+                order.setdefault("filled_avg_price", pos["current_price"])
                 order.setdefault("qty", pos["qty"])
-                print(f"    ✓ SELL order submitted: {order.get('order_id','?')}")
-                oid = order.get("order_id")
-                if oid:
-                    fp, fq, confirmed = self._await_fill(oid, ticker)
-                    if confirmed:
-                        order["filled_avg_price"] = fp
-                        order["filled_qty"]       = fq
-                        order["price_estimated"]  = False
-                    else:
-                        order.setdefault("filled_avg_price", pos["current_price"])
-                        order["price_estimated"] = True
-                else:
-                    order.setdefault("filled_avg_price", pos["current_price"])
-                    order["price_estimated"] = True
                 orders.append(order)
+                print(f"    ✓ SELL order placed: {order.get('order_id','?')}")
             else:
                 print(f"    [DRY RUN] would sell {ticker}")
                 orders.append({"ticker": ticker, "side": "sell", "dry_run": True})
@@ -272,27 +244,10 @@ class PositionReconciler:
                     side     = "buy",
                     notional = notional,
                 )
+                orders.append(order)
                 if order:
                     cash_remaining -= notional
-                    print(f"    ✓ BUY order submitted: {order.get('order_id','?')}")
-                    oid = order.get("order_id")
-                    if oid:
-                        fp, fq, confirmed = self._await_fill(oid, ticker, notional=notional)
-                        if confirmed:
-                            order["filled_avg_price"] = fp
-                            order["filled_qty"]       = fq
-                            order["price_estimated"]  = False
-                        else:
-                            order["price_estimated"] = True
-                    else:
-                        order["price_estimated"] = True
-                    orders.append(order)
-                    # seed bars-held at 0 so next-run increment lands at 1
-                    # (entry-bar parity with backtest _bars_held logic)
-                    _hs = _load_hold_state()
-                    if ticker not in _hs:
-                        _hs[ticker] = {"bars": 0, "last_inc_date": date.today().isoformat()}
-                        _save_hold_state(_hs)
+                    print(f"    ✓ BUY order placed: {order.get('order_id','?')}")
             else:
                 print(f"    [DRY RUN] would buy {ticker} for ${notional:,.0f}")
                 orders.append({
@@ -302,64 +257,6 @@ class PositionReconciler:
                 cash_remaining -= notional
 
         return orders
-
-    def _await_fill(self, order_id: str, ticker: str,
-                    retries: int = 5, interval: float = 2.0,
-                    notional: float = 0.0):
-        """Poll Alpaca until both filled_avg_price AND filled_qty > 0.
-        Returns (price, qty, confirmed). Fallback chain ensures qty is never 0.
-
-        Fallback order when retries exhaust with price confirmed but qty=0:
-          1. Notional order: qty = notional / filled_avg_price (computed, reliable)
-          2. Share-based: get_positions() and read actual held qty for ticker
-          3. Last resort: log price with qty=0 (prints warning; needs reconciliation)
-        If price never arrives: return (None, None, False) → estimated price path.
-        """
-        last_price = None
-        for attempt in range(retries):
-            time.sleep(interval)
-            try:
-                o  = self.client.get_order(order_id)
-                fp = o.get("filled_avg_price")
-                fq = o.get("filled_qty")
-                if fp:
-                    last_price = float(fp)
-                if fp and fq and float(fq) > 0:
-                    price, qty = float(fp), float(fq)
-                    print(f"    ✓ {ticker} fill confirmed: "
-                          f"${price:.4f} × {qty:.6f} sh (attempt {attempt+1}/{retries})")
-                    return price, qty, True
-                # price arrived but qty still 0 — keep polling
-            except Exception as e:
-                print(f"    fill poll error [{ticker}]: {e}")
-
-        # Fallback chain — price confirmed but qty never propagated
-        if last_price:
-            # 1. Notional order: compute qty from notional / fill_price
-            if notional:
-                fallback_qty = round(notional / last_price, 6)
-                print(f"    ⚠ {ticker}: qty lag — computed qty={fallback_qty:.6f} "
-                      f"from notional/price (price confirmed)")
-                return last_price, fallback_qty, True
-            # 2. Share-based order: pull actual position qty from Alpaca
-            try:
-                pos_map = {p["ticker"]: p for p in self.client.get_positions()}
-                if ticker in pos_map:
-                    pos_qty = float(pos_map[ticker]["qty"])
-                    if pos_qty > 0:
-                        print(f"    ⚠ {ticker}: qty lag — using position "
-                              f"qty={pos_qty:.6f} from Alpaca (price confirmed)")
-                        return last_price, pos_qty, True
-            except Exception as e:
-                print(f"    position fallback error [{ticker}]: {e}")
-            # 3. Last resort: price confirmed, qty unknown — flag for reconciliation
-            print(f"    ✗ {ticker}: qty could not be determined — "
-                  f"logging price=${last_price:.4f} with qty=0; needs reconciliation")
-            return last_price, 0.0, True
-
-        print(f"    ⚠ {ticker}: fill not confirmed after {retries} retries "
-              f"(~{int(retries * interval)}s) — price will be ESTIMATED")
-        return None, None, False
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -374,7 +271,7 @@ class LiveTradeLogger:
     COLUMNS = [
         "date", "ticker", "action", "price", "shares",
         "proba", "weight", "hmm_regime", "reason",
-        "portfolio_value", "order_id", "notional", "price_estimated",
+        "portfolio_value", "order_id", "notional",
     ]
 
     def __init__(self, log_path: str = LIVE_TRADE_LOG):
@@ -384,12 +281,6 @@ class LiveTradeLogger:
     def _ensure_header(self):
         if not os.path.exists(self.path):
             pd.DataFrame(columns=self.COLUMNS).to_csv(self.path, index=False)
-            return
-        existing = pd.read_csv(self.path)
-        for col in self.COLUMNS:
-            if col not in existing.columns:
-                existing[col] = None
-        existing[self.COLUMNS].to_csv(self.path, index=False)
 
     def log(
         self,
@@ -403,24 +294,22 @@ class LiveTradeLogger:
         hmm_regime:      str,
         reason:          str,
         portfolio_value: float,
-        order_id:        str  = "",
+        order_id:        str = "",
         notional:        float = 0.0,
-        price_estimated: bool  = False,
     ):
         row = pd.DataFrame([{
             "date":            date_str,
             "ticker":          ticker,
             "action":          action,
-            "price":           round(float(price or 0), 4),
-            "shares":          round(float(shares or 0), 6),
-            "proba":           round(float(proba or 0), 4),
-            "weight":          round(float(weight or 0), 4),
+            "price":           round(price, 4),
+            "shares":          round(shares, 6),
+            "proba":           round(proba, 4),
+            "weight":          round(weight, 4),
             "hmm_regime":      hmm_regime,
             "reason":          reason,
-            "portfolio_value": round(float(portfolio_value or 0), 2),
+            "portfolio_value": round(portfolio_value, 2),
             "order_id":        order_id,
-            "notional":        round(float(notional or 0), 2),
-            "price_estimated": price_estimated,
+            "notional":        round(notional, 2),
         }])
         row.to_csv(self.path, mode="a", header=False, index=False)
 
@@ -433,21 +322,12 @@ class LiveTradeLogger:
         """Log a completed order using signal context and portfolio state."""
         if not order or "ticker" not in order:
             return
-        _raw_price  = order.get("filled_avg_price") or order.get("price")
-        _fill_price = float(_raw_price) if _raw_price is not None \
-                      else float(signal.get("price") or 0)
-        _raw_qty    = order.get("filled_qty") or order.get("qty")
-        _fill_qty   = float(_raw_qty) if _raw_qty is not None else 0.0
-        _estimated  = bool(order.get("price_estimated", False))
-        if _estimated:
-            print(f"    ⚠ {order['ticker']} price ESTIMATED "
-                  f"(${_fill_price:.2f}) — fill not confirmed; flagged in log")
         self.log(
             date_str        = signal.get("date", str(date.today())),
             ticker          = order["ticker"],
             action          = order["side"].upper(),
-            price           = _fill_price,
-            shares          = _fill_qty,
+            price           = order.get("filled_avg_price", 0),
+            shares          = order.get("qty", 0),
             proba           = signal.get("confidence", 0.5),
             weight          = signal.get("pos_value", 0) /
                               max(portfolio.get("equity", 100_000), 1),
@@ -456,7 +336,6 @@ class LiveTradeLogger:
             portfolio_value = portfolio.get("equity", 0),
             order_id        = order.get("order_id", ""),
             notional        = order.get("notional", 0),
-            price_estimated = _estimated,
         )
 
 
@@ -466,7 +345,7 @@ class LiveTradeLogger:
 # ══════════════════════════════════════════════════════════════════════════
 
 def log_equity(equity: float, regime: str = "Unknown"):
-    """Write today's equity to the live equity curve (upsert — one row per date)."""
+    """Append today's equity to the live equity curve."""
     today = date.today().strftime("%Y-%m-%d")
     row   = pd.DataFrame([{
         "date":   today,
@@ -476,9 +355,7 @@ def log_equity(equity: float, regime: str = "Unknown"):
     if not os.path.exists(LIVE_EQUITY):
         row.to_csv(LIVE_EQUITY, index=False)
     else:
-        existing = pd.read_csv(LIVE_EQUITY)
-        existing = existing[existing["date"] != today]   # drop same-day row if present
-        pd.concat([existing, row], ignore_index=True).to_csv(LIVE_EQUITY, index=False)
+        row.to_csv(LIVE_EQUITY, mode="a", header=False, index=False)
     print(f"  ✓ Equity logged: ${equity:,.2f} | regime: {regime}")
 
 
@@ -574,9 +451,8 @@ class LiveEngine:
                 sell_orders = reconciler.execute_sells(sell_signals, self.dry_run)
                 results["orders"].extend(sell_orders)
 
-                # Brief pause for sell proceeds to settle, then refresh buying power.
-                # Fill confirmation already happened inside execute_sells/_await_fill.
-                time.sleep(1)
+                # Then buys — wait for sell proceeds to settle into buying power
+                time.sleep(3)
                 fresh_account = self.client.get_account()
                 buy_orders    = reconciler.execute_buys(
                     buy_signals,
@@ -584,6 +460,33 @@ class LiveEngine:
                     dry_run        = self.dry_run,
                 )
                 results["orders"].extend(buy_orders)
+
+                # Refresh fill prices before logging — orders are submitted async,
+                # so filled_avg_price is 0 at placement time.
+                for order in buy_orders + sell_orders:
+                    oid = order.get("order_id")
+                    if not oid or oid in ("?", "", "manual_backfill"):
+                        continue
+                    filled_ok = False
+                    for attempt in range(6):           # up to ~15s total
+                        time.sleep(2.5)
+                        try:
+                            filled = self.client.get_order(oid)
+                            if filled.get("filled_avg_price"):
+                                order["filled_avg_price"] = filled["filled_avg_price"]
+                                order["qty"] = filled["qty"] or order.get("qty", 0)
+                                filled_ok = True
+                                break
+                            if filled.get("status") in ("filled", "partially_filled"):
+                                order["filled_avg_price"] = filled.get("filled_avg_price", 0)
+                                order["qty"] = filled.get("qty", 0)
+                                filled_ok = True
+                                break
+                        except Exception as e:
+                            print(f"      fill refresh error {oid}: {e}")
+                    if not filled_ok:
+                        print(f"      ⚠ {order.get('ticker','?')} fill not confirmed "
+                              f"after retries — logging may show 0, backfill needed")
 
                 # Step 5 — Log trades
                 print("\n  [5] Trade logging")
@@ -603,10 +506,7 @@ class LiveEngine:
             # Step 6 — Log equity
             print("\n  [6] Equity snapshot")
             regime = getattr(self, "_last_regime", "Unknown")
-            if not self.dry_run:
-                log_equity(equity, regime)
-            else:
-                print(f"  ✓ Equity (dry-run, not written): ${equity:,.2f} | regime: {regime}")
+            log_equity(equity, regime)
             results["regime"] = regime
 
         except Exception as e:
@@ -630,9 +530,8 @@ class LiveEngine:
         HMM regime → global XGBoost (baseline) → sector XGBoost (overwrites)
         → regime gate → sector-native threshold → buy/sell decision.
         """
-        signals     = []
-        today_str   = date.today().strftime("%Y-%m-%d")
-        _hold_state = _load_hold_state()   # safe default; overwritten inside try
+        signals = []
+        today_str = date.today().strftime("%Y-%m-%d")
 
         try:
             # Load live price data
@@ -650,23 +549,7 @@ class LiveEngine:
             except Exception:
                 last_bar_date = today_str
 
-            _all_positions = self.client.get_positions()
-            held           = {p["ticker"] for p in _all_positions}
-            positions_map  = {p["ticker"]: p for p in _all_positions}
-
-            # ── bars-held counter (idempotent per calendar day) ────────────
-            _today_iso  = date.today().isoformat()
-            _hold_state = _load_hold_state()
-            for _t in held:
-                _rec = _hold_state.get(_t, {"bars": -1, "last_inc_date": None})
-                if _rec["last_inc_date"] != _today_iso:
-                    _rec["bars"] += 1
-                    _rec["last_inc_date"] = _today_iso
-                _hold_state[_t] = _rec
-            for _t in list(_hold_state.keys()):
-                if _t not in held:
-                    del _hold_state[_t]   # purge closed positions
-            bars_held = {_t: _rec["bars"] for _t, _rec in _hold_state.items()}
+            held = {p["ticker"] for p in self.client.get_positions()}
 
             # ── STEP 1: HMM regime ─────────────────────────────────────
             if self._hmm is None:
@@ -685,7 +568,7 @@ class LiveEngine:
             _state = _load_regime_state()
             prev_regime = _state.get("prev_regime", "Unknown")
 
-            if regime in ("Bear-Stress", "Bear-Stable"):
+            if regime in ("Bear-Trending", "Bear-Stress"):
                 _state["bear_confirm_count"] = _state.get("bear_confirm_count", 0) + 1
             else:
                 _state["bear_duration_bars"] = _state.get("bear_confirm_count", 0)
@@ -693,7 +576,7 @@ class LiveEngine:
 
             _just_flipped_bull = (
                 regime in ("Bull-Trending", "Bull-Stable") and
-                prev_regime in ("Bear-Stable", "Bear-Stress")
+                prev_regime in ("Bear-Trending", "Bear-Stable", "Bear-Stress")
             )
             _state["prev_regime"] = regime
             _save_regime_state(_state)
@@ -792,15 +675,6 @@ class LiveEngine:
                 else:
                     sell_thr = 0.45
                 if proba < sell_thr:
-                    # mirror backtest line 1573: profitable + too new → skip sell
-                    _pos   = positions_map.get(tkr)
-                    _bheld = bars_held.get(tkr, 99)   # 99 = unknown → fail-safe allow sell
-                    if (_pos is not None
-                            and _bheld < MIN_HOLD_BARS
-                            and _pos["current_price"] > _pos["avg_price"]):
-                        print(f"      HOLD {tkr}: min-hold ({_bheld}/{MIN_HOLD_BARS} bars, "
-                              f"profitable {_pos['current_price']:.2f}>{_pos['avg_price']:.2f})")
-                        continue
                     signals.append({
                         "date":       today_str,
                         "ticker":     tkr,
@@ -853,8 +727,6 @@ class LiveEngine:
                         "confidence": round(proba, 3),
                         "hmm_regime": regime,
                         "pos_value":  round(equity * pos_size, 2),
-                        "price":      float(price_data[ticker]["close"].iloc[-1])
-                                      if ticker in price_data else 0.0,
                         "reason":     f"{src}_xgboost_signal",
                     })
                     print(f"      BUY {ticker}: proba={proba:.3f} "
@@ -873,8 +745,6 @@ class LiveEngine:
                             "confidence": 1.0,
                             "hmm_regime": regime,
                             "pos_value":  round(equity * anchor_size, 2),
-                            "price":      float(price_data[anchor]["close"].iloc[-1])
-                                          if anchor in price_data else 0.0,
                             "reason":     "anchor_reentry",
                         })
                         print(f"      ANCHOR BUY {anchor}: "
@@ -884,8 +754,6 @@ class LiveEngine:
             print(f"      ⚠ Signal generation error: {e}")
             traceback.print_exc()
 
-        if not self.dry_run:
-            _save_hold_state(_hold_state)
         return signals
 
     def _tsla_signals(self, price_data: dict, regime: str,
@@ -922,7 +790,7 @@ class LiveEngine:
 
         peak_exit = in_pos and rsi_was_hot and rsi_falling
         ext_exit  = in_pos and pct > 120.0
-        bear_exit = in_pos and regime in ("Bear-Trending","Bear-Stress")
+        bear_exit = in_pos and regime in ("Bear-Trending", "Bear-Stress")
 
         if peak_exit or ext_exit or bear_exit:
             reason = ("tsla_peak_exit" if peak_exit else
@@ -941,7 +809,6 @@ class LiveEngine:
                 "ticker": "TSLA", "action": "BUY",
                 "confidence": 0.88, "hmm_regime": regime,
                 "pos_value": round(equity * 0.12 * 0.80, 2),
-                "price":     float(cls[-1]),
                 "reason": "tsla_runup_entry",
             })
         return out

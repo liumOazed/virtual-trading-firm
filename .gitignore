@@ -70,6 +70,11 @@ newsapi_quota.json
 # ========================================
 **/test/
 alpaca_test.py
+4_signals/mr_blend_backtest.py
+4_signals/mr_edge_probe.py
+5_backtesting/backtest_f.py
+5_backtesting/trade_analysis.py
+5_backtesting/trade_pnl_analysis.py
 
 # ========================================
 # Backtesting Runtime Output
