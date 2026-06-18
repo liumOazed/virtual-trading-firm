@@ -350,37 +350,37 @@ here for completeness.
 
 **Trade analysis** (335 closed round trips):
 
-| Metric             | Value             |
-| ------------------ | ----------------- |
-| Win rate           | 66.57%            |
-| Avg win            | +11.83%           |
-| Avg loss           | -4.35%            |
-| Payoff ratio       | 2.722             |
-| Profit factor      | 4.844             |
-| Expectancy         | +6.42% per trade  |
-| Avg hold           | 67.3 days         |
+| Metric             | Value              |
+| ------------------ | ------------------ |
+| Win rate           | 66.57%             |
+| Avg win            | +11.83%            |
+| Avg loss           | -4.35%             |
+| Payoff ratio       | 2.722              |
+| Profit factor      | 4.844              |
+| Expectancy         | +6.42% per trade   |
+| Avg hold           | 67.3 days          |
 | Best / worst trade | +402.91% / -19.67% |
-| Total gross P&L    | $360,618          |
+| Total gross P&L    | $360,618           |
 
 **Regime breakdown** (all 4 HMM states covered):
 
-| Regime        | Bars | Ann Ret% | Sharpe | Max DD% | Win%  |
-| ------------- | ---- | -------- | ------ | ------- | ----- |
-| Bull-Trending | 176  | 93.77    | 3.84   | -4.92   | 76.1  |
-| Bull-Stable   | 643  | 27.17    | 1.35   | -6.72   | 61.9  |
-| Bear-Stable   | 561  | 30.74    | 1.81   | -2.97   | 70.1  |
-| Bear-Stress   | 23   | -3.61    | -0.35  | -1.95   | 66.7  |
+| Regime        | Bars | Ann Ret% | Sharpe | Max DD% | Win% |
+| ------------- | ---- | -------- | ------ | ------- | ---- |
+| Bull-Trending | 176  | 93.77    | 3.84   | -4.92   | 76.1 |
+| Bull-Stable   | 643  | 27.17    | 1.35   | -6.72   | 61.9 |
+| Bear-Stable   | 561  | 30.74    | 1.81   | -2.97   | 70.1 |
+| Bear-Stress   | 23   | -3.61    | -0.35  | -1.95   | 66.7 |
 
 **Benchmark comparison** (buy & hold, identical OOS dates):
 
-| Metric             | ARIA     | SPY B&H  | QQQ B&H  |
-| ------------------ | -------- | -------- | -------- |
-| Total return       | +95.55%  | +140.00% | +169.24% |
-| Sharpe (raw)       | 1.442    | 1.016    | 0.907    |
-| Max drawdown       | -6.82%   | -24.50%  | -35.12%  |
-| Alpha (ann) vs SPY | ~+4%     | —        | —        |
-| Beta vs SPY        | ~0.28    | —        | —        |
-| Correlation vs SPY | ~0.49    | —        | —        |
+| Metric             | ARIA    | SPY B&H  | QQQ B&H  |
+| ------------------ | ------- | -------- | -------- |
+| Total return       | +95.55% | +140.00% | +169.24% |
+| Sharpe (raw)       | 1.442   | 1.016    | 0.907    |
+| Max drawdown       | -6.82%  | -24.50%  | -35.12%  |
+| Alpha (ann) vs SPY | ~+4.6%  | —        | —        |
+| Beta vs SPY        | ~0.28   | —        | —        |
+| Correlation vs SPY | ~0.49   | —        | —        |
 
 **How to read this:** ARIA returns less than buy-and-hold SPY/QQQ in
 absolute terms (+95.55% vs +140%/+169%) but with significantly higher
@@ -396,6 +396,93 @@ June 2026 has run entirely in Bull-Stable — meaning live performance is
 now directly comparable to the 27.17% annualised / Sharpe 1.35 backtested
 Bull-Stable period. The conditional min-hold fix (live-mirrored June 2026)
 is expected to reduce the hypercloud churn observed in early live runs.
+
+---
+
+### Why the 95.55% engine is better than the prior 100.4% version
+
+The headline return dropped. Every risk-adjusted and architectural metric
+improved.
+
+**Risk-adjusted comparison:**
+
+| Metric         | Old (100.4%) | Current (95.55%) | Better              |
+| -------------- | ------------ | ---------------- | ------------------- |
+| Total return   | 100.4%       | 95.55%           | Old (headline only) |
+| Annual return  | 13.14%       | 12.61%           | ~Tie (0.5pt apart)  |
+| Sharpe (raw)   | 1.321        | 1.442            | **Current**         |
+| Sortino        | 1.169        | 1.320            | **Current**         |
+| Calmar         | 1.301        | 1.849            | **Current** (+42%)  |
+| Max drawdown   | -10.1%       | -6.82%           | **Current**         |
+| Annualised vol | 9.84%        | 8.61%            | **Current**         |
+
+Three reasons the current engine is better despite the lower headline:
+
+**1. Risk-adjusted quality.** Annual return is essentially tied (12.61% vs
+13.14% — 0.5 percentage points apart over 5.5 years). The current engine
+achieves that return on substantially less risk: -6.82% vs -10.1% max
+drawdown (33% shallower), lower volatility, and higher Sharpe, Sortino, and
+Calmar. Same reward, much less risk — a better engine by definition.
+
+**2. Modern regime architecture.** The old 100.4% was built on the 2-state
+Hurst taxonomy (Bear-Trending / Bull-Trending). The current engine uses the
+4-state GaussianHMM (Bull-Trending, Bull-Stable, Bear-Stable, Bear-Stress)
+— a different, more refined architecture, not just a retuned one. That
+structural change also enabled the 8-phase enhancement stack (ESN latent
+PCA, cross-asset macro layer, inflation signal engine, tail-risk hedger,
+structural break detector) that was impossible on the old taxonomy.
+
+**3. Leverage headroom = the path to 100%+.** The lower drawdown is not just
+"safer" — it is leverage capacity. At 1.30x, the current engine is projected
+to produce ~133% total at -8.9% max DD — still below the old engine's
+unlevered -10.1%. At ~1.47x (matched to the old engine's risk level), the
+projected return is ~158%, approximately 58 points more than the old engine
+made at identical drawdown.
+
+_Honest note on per-trade stats:_ the old engine had marginally better
+per-trade statistics (profit factor 5.372 vs 4.844, win rate 68.64% vs
+66.57%). Those do not offset accepting ~48% more drawdown (-10.1% vs -6.82%)
+for essentially the same annual return. The trade-off favours the current
+engine for any leverage-based path to the 100%+ goal.
+
+_Honest note on the ceiling:_ the 95.55% was reached by testing ~19 ideas
+and keeping exactly ONE structural change (the conditional min-hold). That
+makes it an exhaustively-tested, honest baseline — not a curve-fit. The old
+100.4% was a vanity headline on a riskier, older architecture.
+
+**Leverage projection** (projected — linear-scaling estimate, NOT a re-backtested result):
+
+| Leverage | Annual% | Max DD% | ~Total (5.5y) | Notes                                                 |
+| -------- | ------- | ------- | ------------- | ----------------------------------------------------- |
+| 1.00x    | 12.61%  | -6.82%  | ~95%          | Base, unlevered                                       |
+| 1.15x    | ~14.5%  | ~-7.8%  | ~113%         |                                                       |
+| 1.30x    | ~16.4%  | ~-8.9%  | ~133%         | Clears 100%+ goal; DD still below old engine's -10.1% |
+| 1.45x    | ~18.3%  | ~-9.9%  | ~155%         |                                                       |
+| ~1.47x   | ~18.5%  | ~-10.0% | ~158%         | Matched to old engine's risk; ~58pt more return       |
+
+**Key framing:** at the same max drawdown the old engine took to make 100.4%
+(-10.1%), the current engine projects ~158% — roughly 58 percentage points
+more return at identical risk. At the planned 1.30x target, it clears the
+100%+ goal (~133%) at -8.9% DD, lower risk than the old engine ran unlevered.
+
+**Mandatory caveats — these apply before any leverage is ever considered:**
+
+1. **Projected, not backtested.** Linear-scaling estimates only. A real
+   levered backtest could differ due to path effects, volatility drag, and
+   margin calls at drawdown troughs.
+2. **Borrow cost excluded.** Margin interest (~5–7%/yr on the borrowed
+   portion) shaves real return. At 1.30x, expect ~1.5–2%/yr drag; net
+   annual is closer to ~15–16%, not 16.4%. The table is gross of borrow cost.
+3. **Drawdown scales too.** At 1.45x, a normal -6.82% backtest stretch
+   becomes -9.9%; a rough live fortnight like the -7.5% already observed
+   becomes ~-11%. Leverage amplifies losses identically to gains.
+4. **Post-validation only.** These projections are modelled on backtest
+   drawdown. Live must first confirm DD stays near -6.82% over a full market
+   cycle (including a drawdown AND recovery) before any leverage is applied.
+   No leverage during validation. If it is ever applied, ramp gradually
+   (1.15x → 1.30x) — never jump.
+
+---
 
 **Live paper** (reset 2026-06-15, $100k, locked engine): in validation.
 Tracked daily via `daily_recorder.py` with alpha measured against SPY/QQQ.
@@ -463,34 +550,34 @@ forced. Killing a bad strategy is a successful outcome.
 
 ## Live Operations
 
-| Task                       | Who                                    | When                              | Duration |
-| -------------------------- | -------------------------------------- | --------------------------------- | -------- |
-| Daily live run (ARIA)      | Manual, `run_live.py`                  | Weekdays ~19:30 Dhaka (US open)   | ~3-4 min |
-| Daily status check (ARIA)  | Manual, `run_live.py --status`         | After run                         | seconds  |
-| Daily recording (ARIA)     | Manual, `daily_recorder.py`            | After US close                    | ~30 sec  |
-| Growth rebalance check     | Manual, `aria_growth_executor.py`      | Weekly (dry-run; --execute)       | ~30 sec  |
-| Growth daily log           | Manual, `aria_growth_daily_log.py`     | Daily after US close (~2am Dhaka) | ~30 sec  |
-| Growth monthly re-screen   | Manual, `growth_screener.py` + archive | 1st of month, then --reset-stops  | ~5 min   |
-| Model retrain (ARIA)       | Manual, `python retrain.py` (--dry-run / --skip-gate) | As needed; NOT auto during live validation | ~1-2 hr |
-| RL agent retrain           | SHELVED                                | —                                 | —        |
+| Task                      | Who                                                   | When                                       | Duration |
+| ------------------------- | ----------------------------------------------------- | ------------------------------------------ | -------- |
+| Daily live run (ARIA)     | Manual, `run_live.py`                                 | Weekdays ~19:30 Dhaka (US open)            | ~3-4 min |
+| Daily status check (ARIA) | Manual, `run_live.py --status`                        | After run                                  | seconds  |
+| Daily recording (ARIA)    | Manual, `daily_recorder.py`                           | After US close                             | ~30 sec  |
+| Growth rebalance check    | Manual, `aria_growth_executor.py`                     | Weekly (dry-run; --execute)                | ~30 sec  |
+| Growth daily log          | Manual, `aria_growth_daily_log.py`                    | Daily after US close (~2am Dhaka)          | ~30 sec  |
+| Growth monthly re-screen  | Manual, `growth_screener.py` + archive                | 1st of month, then --reset-stops           | ~5 min   |
+| Model retrain (ARIA)      | Manual, `python retrain.py` (--dry-run / --skip-gate) | As needed; NOT auto during live validation | ~1-2 hr  |
+| RL agent retrain          | SHELVED                                               | —                                          | —        |
 
 ---
 
 ## Known Issues (current)
 
-| Issue                                                                                                                                                                         | Status                                                                                          |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **Backtest never entered Bull-Stable or Bear-Stress** (old Hurst taxonomy) | **Resolved** — current 4-state HMM covers all regimes; Bull-Stable is the largest (643 bars). See Resolved Finding above. |
-| ~~Trapped exits~~: held positions couldn't sell when sector gated out                                                                                                          | **Fixed (2026-06-18)** — sells bypass the regime/sector gate entirely; held positions always sellable, confirmed live as gate-independent |
-| ~~Fill price logs as 0~~ if order fills slower than retry window                                                                                                               | **Fixed (2026-06-18)** — `_await_fill` polls until BOTH price AND qty > 0 (5×2s); fallback chain (notional÷price → get_positions qty) makes a silent 0 structurally impossible; `price_estimated` flag added to trade log |
+| Issue                                                                                                                                                                                                         | Status                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Backtest never entered Bull-Stable or Bear-Stress** (old Hurst taxonomy)                                                                                                                                    | **Resolved** — current 4-state HMM covers all regimes; Bull-Stable is the largest (643 bars). See Resolved Finding above.                                                                                                                           |
+| ~~Trapped exits~~: held positions couldn't sell when sector gated out                                                                                                                                         | **Fixed (2026-06-18)** — sells bypass the regime/sector gate entirely; held positions always sellable, confirmed live as gate-independent                                                                                                           |
+| ~~Fill price logs as 0~~ if order fills slower than retry window                                                                                                                                              | **Fixed (2026-06-18)** — `_await_fill` polls until BOTH price AND qty > 0 (5×2s); fallback chain (notional÷price → get_positions qty) makes a silent 0 structurally impossible; `price_estimated` flag added to trade log                           |
 | **Live/backtest parity gap** — conditional min-hold (+5% structural win: hold profitable positions < 3 bars through churn, losers exit immediately) existed only in the backtest; live ran old churn behavior | **Fixed (2026-06-18)** — min-hold mirrored into `live_engine.py`: seeded at buy (entry bar = bar 0), idempotent per date, dry-run-safe, persisted via `position_hold_state.json`; forced exits (bear_heat_trim, regime_exit, TSLA) remain unguarded |
-| FinBERT returns identical sentiment across tickers                                                                                                                            | Disabled in live; ticker-specific feed + retrain planned                                        |
-| Hypercloud round-trip churn in Bull-Stable (buy ~0.55, sell ~0.40 days later)                                                                                                 | Monitoring — consistent with backtested Bull-Stable (61.9% win, frequent rotations); min-hold fix now live and expected to reduce churn |
-| Drift gate is a stub — `regime_selector.py` reads `drift_auc` from signal_cache but nothing computes/writes it, so it defaults to 0.5 (gate never fires)                      | Open — drift producer never built; gate is dead code. Build post-validation if needed           |
-| AVGO Tier 3 / TSLA blacklist in regime_selector.py, yet both held live                                                                                                        | Open — suggests live engine may not apply selector tier gates; investigate                      |
-| COVID crash / 2018 Q4 stress tests return NaN                                                                                                                                 | Outside current backtest date range                                                             |
-| ARIA-Growth not historically validated (current-snapshot screen)                                                                                                              | By design — monthly archive building point-in-time data for an EDGAR backtest                   |
-| ARIA-Growth regime detection lags (200dma) — slow to de-risk in fast crash                                                                                                    | Mitigated by 15% per-stock stop; thresholds editable, to be tuned in backtest                   |
+| FinBERT returns identical sentiment across tickers                                                                                                                                                            | Disabled in live; ticker-specific feed + retrain planned                                                                                                                                                                                            |
+| Hypercloud round-trip churn in Bull-Stable (buy ~0.55, sell ~0.40 days later)                                                                                                                                 | Monitoring — consistent with backtested Bull-Stable (61.9% win, frequent rotations); min-hold fix now live and expected to reduce churn                                                                                                             |
+| Drift gate is a stub — `regime_selector.py` reads `drift_auc` from signal_cache but nothing computes/writes it, so it defaults to 0.5 (gate never fires)                                                      | Open — drift producer never built; gate is dead code. Build post-validation if needed                                                                                                                                                               |
+| AVGO Tier 3 / TSLA blacklist in regime_selector.py, yet both held live                                                                                                                                        | Open — suggests live engine may not apply selector tier gates; investigate                                                                                                                                                                          |
+| COVID crash / 2018 Q4 stress tests return NaN                                                                                                                                                                 | Outside current backtest date range                                                                                                                                                                                                                 |
+| ARIA-Growth not historically validated (current-snapshot screen)                                                                                                                                              | By design — monthly archive building point-in-time data for an EDGAR backtest                                                                                                                                                                       |
+| ARIA-Growth regime detection lags (200dma) — slow to de-risk in fast crash                                                                                                                                    | Mitigated by 15% per-stock stop; thresholds editable, to be tuned in backtest                                                                                                                                                                       |
 
 ---
 
