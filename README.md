@@ -455,9 +455,9 @@ makes it an exhaustively-tested, honest baseline — not a curve-fit. The old
 | Leverage | Annual% | Max DD% | ~Total (5.5y) | Notes                                                 |
 | -------- | ------- | ------- | ------------- | ----------------------------------------------------- |
 | 1.00x    | 12.61%  | -6.82%  | ~95%          | Base, unlevered                                       |
-| 1.15x    | ~14.5%  | ~-7.8%  | ~113%         |                                                       |
-| 1.30x    | ~16.4%  | ~-8.9%  | ~133%         | Clears 100%+ goal; DD still below old engine's -10.1% |
-| 1.45x    | ~18.3%  | ~-9.9%  | ~155%         |                                                       |
+| 1.15x    | ~14.5%  | ~-7.8%  | ~113%         | Clears 100%+ goal; DD still below old engine's -10.1% |
+| 1.30x    | ~16.4%  | ~-8.9%  | ~133%         |
+| 1.45x    | ~18.3%  | ~-9.9%  | ~155%         | Beating SPY DD still below 10%                        |
 | ~1.47x   | ~18.5%  | ~-10.0% | ~158%         | Matched to old engine's risk; ~58pt more return       |
 
 **Key framing:** at the same max drawdown the old engine took to make 100.4%
