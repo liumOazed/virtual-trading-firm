@@ -1,10 +1,6 @@
 {
-  "AAPL": {
-    "bars": 0,
-    "last_inc_date": "2026-06-18"
-  },
-  "MSFT": {
-    "bars": 0,
-    "last_inc_date": "2026-06-18"
+  "GLD": {
+    "bars": 6,
+    "last_inc_date": "2026-07-09"
   }
 }

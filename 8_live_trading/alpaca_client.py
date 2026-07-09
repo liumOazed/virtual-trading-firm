@@ -175,10 +175,23 @@ class AlpacaClient:
             raise
 
     def close_position(self, ticker: str) -> Dict:
-        """Close entire position for ticker. Returns order dict."""
+        """Close entire position for ticker. Returns normalized order dict (same shape as place_order)."""
         try:
-            resp = self._delete(TRADE_URL, f"/v2/positions/{ticker}")
-            return resp
+            data = self._delete(TRADE_URL, f"/v2/positions/{ticker}")
+            if not data:
+                return {}
+            # Raw Alpaca DELETE response uses "id" not "order_id" and has filled_avg_price=null
+            # at submission time. Normalize to the same shape as place_order() so execute_sells
+            # can use order.get("order_id") and _await_fill can poll the fill.
+            return {
+                "order_id":         data.get("id", ""),
+                "ticker":           data.get("symbol", ticker),
+                "side":             data.get("side", "sell"),
+                "status":           data.get("status", ""),
+                "qty":              float(data.get("qty") or 0),
+                "filled_avg_price": float(data.get("filled_avg_price") or 0),
+                "submitted_at":     data.get("submitted_at", ""),
+            }
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 404:
                 return {}   # already closed

@@ -207,26 +207,30 @@ class PositionReconciler:
                       f"P&L: ${pos['unrealized_pl']:+.2f}")
 
             if not dry_run:
+                known_price = pos["current_price"]
+                known_qty   = pos["qty"]
                 order = self.client.close_position(ticker)
-                if order is None:
+                if not order:
                     order = {}
                 order.setdefault("ticker", ticker)
                 order.setdefault("side", "sell")
-                order.setdefault("qty", pos["qty"])
+                order["filled_qty"] = known_qty   # authoritative floor; upgraded only if API confirms a real qty
+                order["pos_value"]  = known_qty * known_price  # notional at exit; log_order divides by equity for weight
                 print(f"    ✓ SELL order submitted: {order.get('order_id','?')}")
                 oid = order.get("order_id")
                 if oid:
                     fp, fq, confirmed = self._await_fill(oid, ticker)
-                    if confirmed:
-                        order["filled_avg_price"] = fp
-                        order["filled_qty"]       = fq
+                    if confirmed and fp and float(fp) > 0:
+                        order["filled_avg_price"] = float(fp)
+                        if fq and float(fq) > 0:
+                            order["filled_qty"] = float(fq)  # upgrade to API-confirmed fill qty
                         order["price_estimated"]  = False
                     else:
-                        order.setdefault("filled_avg_price", pos["current_price"])
-                        order["price_estimated"] = True
+                        order["filled_avg_price"] = known_price
+                        order["price_estimated"]  = True
                 else:
-                    order.setdefault("filled_avg_price", pos["current_price"])
-                    order["price_estimated"] = True
+                    order["filled_avg_price"] = known_price
+                    order["price_estimated"]  = True
                 orders.append(order)
             else:
                 print(f"    [DRY RUN] would sell {ticker}")
@@ -321,7 +325,7 @@ class PositionReconciler:
             try:
                 o  = self.client.get_order(order_id)
                 fp = o.get("filled_avg_price")
-                fq = o.get("filled_qty")
+                fq = o.get("filled_qty") or o.get("qty")  # get_order normalizes Alpaca's filled_qty to "qty"
                 if fp:
                     last_price = float(fp)
                 if fp and fq and float(fq) > 0:
@@ -353,8 +357,8 @@ class PositionReconciler:
             except Exception as e:
                 print(f"    position fallback error [{ticker}]: {e}")
             # 3. Last resort: price confirmed, qty unknown — flag for reconciliation
-            print(f"    ✗ {ticker}: qty could not be determined — "
-                  f"logging price=${last_price:.4f} with qty=0; needs reconciliation")
+            print(f"    ✗ {ticker}: fill qty not confirmed after {retries} polls — "
+                  f"execute_sells will use known_qty from position snapshot")
             return last_price, 0.0, True
 
         print(f"    ⚠ {ticker}: fill not confirmed after {retries} retries "
@@ -449,7 +453,7 @@ class LiveTradeLogger:
             price           = _fill_price,
             shares          = _fill_qty,
             proba           = signal.get("confidence", 0.5),
-            weight          = signal.get("pos_value", 0) /
+            weight          = (order.get("pos_value") or signal.get("pos_value", 0)) /
                               max(portfolio.get("equity", 100_000), 1),
             hmm_regime      = signal.get("hmm_regime", "Unknown"),
             reason          = signal.get("reason", "live_signal"),

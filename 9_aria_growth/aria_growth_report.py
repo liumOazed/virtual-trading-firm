@@ -70,8 +70,14 @@ def load_data():
     port["date"]      = pd.to_datetime(port["date"])
     trades["timestamp"] = pd.to_datetime(trades["timestamp"])
 
-    # pnl_pct in positions is stored as a decimal (e.g. 0.0297 = 2.97%)
-    pos["total_pnl_pct_real"] = pos["total_pnl_pct"] * 100
+    # total_pnl_pct in daily_positions is already stored in PERCENT units
+    # (e.g. 11.42 means +11.42%), matching the daily logger's output. A previous
+    # version wrongly assumed decimals and multiplied by 100 (showing +1142%).
+    # Guard: if the column ever looks like decimals (|values| all < 1.5), scale up;
+    # otherwise use as-is. This makes the report correct regardless of source units.
+    _p = pos["total_pnl_pct"].dropna()
+    _looks_decimal = len(_p) > 0 and (_p.abs() < 1.5).all()
+    pos["total_pnl_pct_real"] = pos["total_pnl_pct"] * (100 if _looks_decimal else 1)
 
     return pos, port, trades
 
@@ -184,14 +190,20 @@ def calc_all_metrics(pos, port, trades):
     # ── 2.11 Trade log analysis ──────────────────────────────────────────────
     m["trades_all"]    = trades
     m["entries"]       = trades[trades["side"] == "buy"]
-    m["stops"]         = trades[trades["side"] == "close"]
-    m["redistributions"] = trades[trades["reason"].str.contains("redistribute", na=False)]
+    _closes            = trades[trades["side"] == "close"]
+    _reason            = _closes["reason"].astype(str)
+    m["stops"]         = _closes[_reason.str.contains("STOP", case=False, na=False)]
+    m["manual_drops"]  = _closes[_reason.str.contains("MANUAL", case=False, na=False)]
+    m["rotations"]     = _closes[_reason.str.contains("basket|regime", case=False, na=False)]
+    m["redistributions"] = trades[trades["reason"].astype(str).str.contains("redistribute", na=False)]
 
-    m["n_entries"]     = len(m["entries"][~m["entries"]["reason"].str.contains("redistribute", na=False)])
+    m["n_entries"]     = len(m["entries"][~m["entries"]["reason"].astype(str).str.contains("redistribute", na=False)])
     m["n_stops"]       = len(m["stops"])
+    m["n_drops"]       = len(m["manual_drops"])
+    m["n_rotations"]   = len(m["rotations"])
     m["n_redist"]      = len(m["redistributions"])
-    m["total_deployed"]= m["entries"][~m["entries"]["reason"].str.contains("redistribute", na=False)]["notional"].sum()
-    m["stop_loss_recovered"] = m["stops"]["notional"].sum()
+    m["total_deployed"]= m["entries"][~m["entries"]["reason"].astype(str).str.contains("redistribute", na=False)]["notional"].sum()
+    m["stop_loss_recovered"] = _closes["notional"].sum()
 
     # ── 2.12 Redistribution detail ───────────────────────────────────────────
     m["redist_detail"] = (
@@ -202,23 +214,42 @@ def calc_all_metrics(pos, port, trades):
     )
     m["redist_total"]  = m["redistributions"]["notional"].sum()
 
-    # ── 2.13 SMCI stop-loss event detail ─────────────────────────────────────
-    smci_entry  = trades[(trades["symbol"]=="SMCI") & (trades["side"]=="buy")].iloc[0]
-    smci_exit   = trades[(trades["symbol"]=="SMCI") & (trades["side"]=="close")].iloc[0]
-    m["smci_entry_notional"] = smci_entry["notional"]
-    m["smci_exit_notional"]  = smci_exit["notional"]
-    m["smci_realized_loss"]  = smci_exit["notional"] - smci_entry["notional"]
-    m["smci_realized_pct"]   = m["smci_realized_loss"] / smci_entry["notional"] * 100
-    m["smci_entry_date"]     = smci_entry["timestamp"]
-    m["smci_exit_date"]      = smci_exit["timestamp"]
+    # ── 2.13 Most-recent stop-loss event detail (dynamic, not hardcoded) ──────
+    stop_closes = trades[(trades["side"] == "close") &
+                         (trades["reason"].astype(str).str.contains("STOP", case=False, na=False))]
+    if len(stop_closes):
+        ev = stop_closes.sort_values("timestamp").iloc[-1]      # latest stop-out
+        sym = ev["symbol"]
+        ent = trades[(trades["symbol"] == sym) & (trades["side"] == "buy")]
+        m["stop_event"] = {
+            "symbol": sym,
+            "entry_notional": ent["notional"].iloc[0] if len(ent) else float("nan"),
+            "exit_notional": ev["notional"],
+            "entry_date": ent["timestamp"].iloc[0] if len(ent) else None,
+            "exit_date": ev["timestamp"],
+        }
+        en = m["stop_event"]["entry_notional"]
+        m["stop_event"]["realized_loss"] = ev["notional"] - en
+        m["stop_event"]["realized_pct"] = ((ev["notional"] - en) / en * 100) if en else float("nan")
+    else:
+        m["stop_event"] = None
 
-    # ── 2.14 APP deep dive (worst current position) ──────────────────────────
-    m["app_timeline"] = pos[pos["ticker"]=="APP"].sort_values("date")[
+    # ── 2.14 Deep dive on the CURRENT worst open position (dynamic) ───────────
+    latest_date = pos["date"].max()
+    open_latest = pos[pos["date"] == latest_date]
+    if len(open_latest):
+        worst_sym = open_latest.loc[open_latest["total_pnl_pct_real"].idxmin(), "ticker"]
+    else:
+        worst_sym = None
+    m["deepdive_sym"] = worst_sym
+    m["deepdive_timeline"] = pos[pos["ticker"] == worst_sym].sort_values("date")[
         ["date","entry_price","current_price","total_pnl_usd",
          "total_pnl_pct","day_change_pct","room_to_stop_pct"]
-    ]
-    m["app_min_room"]  = m["app_timeline"]["room_to_stop_pct"].min()
-    m["app_entry"]     = m["app_timeline"].iloc[0]["entry_price"]
+    ] if worst_sym else pd.DataFrame()
+    m["deepdive_min_room"] = (m["deepdive_timeline"]["room_to_stop_pct"].min()
+                              if len(m["deepdive_timeline"]) else float("nan"))
+    m["deepdive_entry"] = (m["deepdive_timeline"].iloc[0]["entry_price"]
+                           if len(m["deepdive_timeline"]) else float("nan"))
 
     # ── 2.15 Beta-like: daily corr with SPY ──────────────────────────────────
     merged = port[["day_change_pct","spy_day_pct"]].dropna()
@@ -307,21 +338,28 @@ def print_report(m):
     print("\n【PER-POSITION TIMELINE】")
     print(m["position_timeline"].round(3).to_string(index=False))
 
-    print("\n【APP DEEP DIVE (worst current position)】")
-    print(f"  Entry price: ${m['app_entry']:.2f}")
-    print(f"  Min room to stop ever: {m['app_min_room']:.2f}%")
-    print(m["app_timeline"].round(3).to_string(index=False))
+    if m["deepdive_sym"]:
+        print(f"\n【DEEP DIVE — current worst open position: {m['deepdive_sym']}】")
+        print(f"  Entry price: ${m['deepdive_entry']:.2f}")
+        print(f"  Min room to stop ever: {m['deepdive_min_room']:.2f}%")
+        print(m["deepdive_timeline"].round(3).to_string(index=False))
 
     print("\n【TRADE LOG SUMMARY】")
     print(f"  Initial entries   : {m['n_entries']} trades  (${m['total_deployed']:,.2f} deployed)")
     print(f"  Stop-loss exits   : {m['n_stops']}")
+    print(f"  Manual drops      : {m['n_drops']}")
+    print(f"  Regime/rotation   : {m['n_rotations']}")
     print(f"  Redistribute buys : {m['n_redist']}")
 
-    print("\n【SMCI STOP-LOSS EVENT】")
-    print(f"  Entry : {m['smci_entry_date'].date()}  ${m['smci_entry_notional']:,.2f}")
-    print(f"  Exit  : {m['smci_exit_date'].date()}   ${m['smci_exit_notional']:,.2f}")
-    print(f"  Realized loss: ${m['smci_realized_loss']:,.2f}  ({m['smci_realized_pct']:.2f}%)")
-    print(f"  Proceeds redistributed: ${m['redist_total']:,.2f}")
+    if m["stop_event"]:
+        ev = m["stop_event"]
+        print(f"\n【MOST RECENT STOP-LOSS EVENT — {ev['symbol']}】")
+        ed = ev["entry_date"].date() if ev["entry_date"] is not None else "?"
+        xd = ev["exit_date"].date() if ev["exit_date"] is not None else "?"
+        print(f"  Entry : {ed}  ${ev['entry_notional']:,.2f}")
+        print(f"  Exit  : {xd}   ${ev['exit_notional']:,.2f}")
+        print(f"  Realized loss: ${ev['realized_loss']:,.2f}  ({ev['realized_pct']:.2f}%)")
+        print(f"  Total proceeds redistributed (all stops): ${m['redist_total']:,.2f}")
 
     print("\n【REDISTRIBUTION ALLOCATION】")
     print(m["redist_detail"].round(2).to_string())
@@ -450,22 +488,24 @@ def make_plots(m):
     style_ax(ax7, "Intra-portfolio daily volatility (std %)", xlabel="Std dev of daily moves")
 
     ax8 = fig.add_subplot(gs[3, 1])
-    app = m["app_timeline"].copy()
-    app["pnl_pct_real"] = app["total_pnl_pct"] * 100
-    ax8.plot(app["date"].dt.strftime("%b %d"), app["pnl_pct_real"],
-             color=RED, linewidth=2, marker="o", markersize=5, label="P&L %")
-    ax8b = ax8.twinx()
-    ax8b.plot(app["date"].dt.strftime("%b %d"), app["room_to_stop_pct"],
-              color=AMBER, linewidth=1.5, linestyle="--", marker="s", markersize=4,
-              label="Room to stop %")
-    ax8b.axhline(0, color=RED, linewidth=0.6, linestyle=":")
-    ax8b.tick_params(colors=MUTC, labelsize=8)
-    ax8b.set_ylabel("Room to stop %", fontsize=9, color=AMBER)
-    ax8.axhline(0, color=MGREY, linewidth=0.8)
-    ax8.yaxis.set_major_formatter(FuncFormatter(lambda v,_: f"{v:.1f}%"))
-    ax8.legend(fontsize=8, loc="lower left")
-    ax8b.legend(fontsize=8, loc="lower right")
-    style_ax(ax8, "APP — P&L & room to stop over time", ylabel="P&L %")
+    app = m["deepdive_timeline"].copy()
+    dd_sym = m["deepdive_sym"] or "—"
+    if len(app):
+        app["pnl_pct_real"] = app["total_pnl_pct"]   # already in percent units
+        ax8.plot(app["date"].dt.strftime("%b %d"), app["pnl_pct_real"],
+                 color=RED, linewidth=2, marker="o", markersize=5, label="P&L %")
+        ax8b = ax8.twinx()
+        ax8b.plot(app["date"].dt.strftime("%b %d"), app["room_to_stop_pct"],
+                  color=AMBER, linewidth=1.5, linestyle="--", marker="s", markersize=4,
+                  label="Room to stop %")
+        ax8b.axhline(0, color=RED, linewidth=0.6, linestyle=":")
+        ax8b.tick_params(colors=MUTC, labelsize=8)
+        ax8b.set_ylabel("Room to stop %", fontsize=9, color=AMBER)
+        ax8.axhline(0, color=MGREY, linewidth=0.8)
+        ax8.yaxis.set_major_formatter(FuncFormatter(lambda v,_: f"{v:.1f}%"))
+        ax8.legend(fontsize=8, loc="lower left")
+        ax8b.legend(fontsize=8, loc="lower right")
+    style_ax(ax8, f"{dd_sym} — P&L & room to stop over time", ylabel="P&L %")
 
     ax9 = fig.add_subplot(gs[3, 2])
     rd = m["redist_detail"].sort_values(ascending=True)
