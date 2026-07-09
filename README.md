@@ -3,7 +3,7 @@
 **Project:** Virtual Trading Firm
 **Repository root:** `D:\__A Google Drive Project\virtual_trading_firm\`
 **Docs location:** `10_docs_v2/`
-**Last updated:** 2026-06-18
+**Last updated:** 2026-07-09
 **Status:** LIVE — paper trading on Alpaca (account reset 2026-06-15, $100k); locked 95.55% / Sharpe 1.442 min-hold engine
 
 ---
@@ -486,13 +486,76 @@ more return at identical risk. At the planned 1.30x target, it clears the
 
 **Live paper** (reset 2026-06-15, $100k, locked engine): in validation.
 Tracked daily via `daily_recorder.py` with alpha measured against SPY/QQQ.
-Live results will be summarized here after the initial validation window
-completes.
+See **Live Validation Reports** below for current numbers.
 
 **ARIA-Growth live paper** (since 2026-06-09, Zed2 account): in validation.
 Tracked daily via `aria_growth_daily_log.py` with book performance measured
-against SPY and QQQ since go-live. Results summarized here once a meaningful
-window accumulates.
+against SPY and QQQ since go-live. See **Live Validation Reports** below.
+
+---
+
+## Live Validation Reports (as of 2026-07-09)
+
+Both live paper books are read-only reviewed by monthly report scripts —
+`aria_momentum_month_end.py` (`8_live_trading/month_end/`) and the ARIA-Growth
+equivalent (`9_aria_growth/month_end/`). Numbers below are pulled straight
+from the latest generated reports. **Sample-size caveat applies to both:**
+a few weeks of live data verifies the machinery and shows behavior; it
+cannot prove or disprove an edge validated over years of backtest.
+
+### ARIA-Momentum (17 trading days since 2026-06-16)
+
+| Metric                | Book       | SPY    | QQQ    |
+| ---------------------- | ---------- | ------ | ------ |
+| Return since inception | **+1.69%** | -1.73% | -4.21% |
+| Alpha                  | —          | +3.42pp | +5.90pp |
+
+Sharpe **4.05** · Sortino **10.19** · Calmar 22.21 · ann. return +26.5% ·
+ann. vol 6.5% · max drawdown **-1.19%** (backtest budget -6.82%) · hit rate
+47% (7W/8L) · best day +0.95% · worst -0.61%. All 17 days so far have traded
+in a single regime (Bull-Stable).
+
+**Why Sharpe/Sortino look inflated:** these are annualized by multiplying
+the daily mean/vol by √252 — a scaling built for a full year of data, not
+17 days. With only one regime observed, no losing streak worse than -0.61%,
+and annualized vol sitting at just 6.5% (backtest Bull-Stable ran at
+~20%+), the ratio comes out several times higher than the locked backtest's
+Bull-Stable Sharpe of 1.35. This is a mechanical small-sample artifact, not
+a claim the live engine is outperforming the backtest by 3x — it will
+compress toward the backtest's regime-level numbers as more days, losing
+streaks, and regime transitions accumulate. (These numbers were also
+re-verified against a data-quality fix on 2026-07-09: a corrupted
+`daily_pnl_pct` row and 8 dates where `daily_history.csv` had drifted from
+the hand-reconciled `live_equity_curve.csv` were corrected, and the root
+cause — `live_engine.py` logging pre-fill equity while `daily_recorder.py`
+ran as a fully separate, unsynced process — was fixed so both files now
+share one post-fill equity snapshot per day.)
+
+### ARIA-Growth (20 trading days since go-live 2026-06-09, Zed2 account)
+
+| Metric                | Book       | SPY    | QQQ    |
+| ---------------------- | ---------- | ------ | ------ |
+| Return since go-live    | **+1.44%** | +1.11% | +0.51% |
+| Alpha                   | —          | +0.33pp | +0.93pp |
+
+Sharpe **0.82** · Sortino **1.30** · Calmar 5.21 · ann. return +15.0% ·
+ann. vol 18.3% · max drawdown -2.88% · beta vs SPY 0.79 (corr 0.64) ·
+up-capture 64% / down-capture 56% (winning by losing less) · hit rate 47%
+(9W/10L) · best day +1.79% · worst -2.92%. 16 open positions (9 in profit);
+4 exits this period (1 stop-loss, 3 manual).
+
+ARIA-Growth's Sharpe reads far more "normal" than ARIA-Momentum's at a
+similar sample size, and that's informative rather than a coincidence: its
+daily swings are an order of magnitude larger (worst day -2.92% vs
+ARIA-Momentum's -0.61%, ann. vol 18.3% vs 6.5%), so the same √252 scaling
+doesn't blow up the ratio the way it does for ARIA-Momentum's unusually
+smooth first three weeks.
+
+**Bottom line:** both books are ahead of SPY and QQQ since their respective
+go-live dates, execution machinery is behaving as designed on both, and
+neither result is old enough to be conclusive — treat the risk-adjusted
+numbers (especially ARIA-Momentum's) as directional, not final, until more
+regimes and a longer sample accumulate.
 
 ---
 
