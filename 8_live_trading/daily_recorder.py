@@ -108,12 +108,12 @@ def _existing_dates():
     except Exception: return set()
 
 
-def record_today(regime_arg=None):
+def record_today(regime_arg=None, account=None, positions=None):
     _ensure()
     today=date.today().isoformat()
-    acct=_get(TRADE_URL,"/v2/account")
+    acct=account if account is not None else _get(TRADE_URL,"/v2/account")
     equity=float(acct["equity"]); cash=float(acct["cash"])
-    positions=_get(TRADE_URL,"/v2/positions")
+    positions=positions if positions is not None else _get(TRADE_URL,"/v2/positions")
     pos_value=sum(float(p["market_value"]) for p in positions)
     unreal=sum(float(p["unrealized_pl"]) for p in positions)
     realized=_realized_through()

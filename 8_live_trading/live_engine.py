@@ -604,11 +604,29 @@ class LiveEngine:
                     logged += 1
                 print(f"      {logged} trades logged")
 
-            # Step 6 — Log equity
-            print("\n  [6] Equity snapshot")
+            # Step 6 — Equity snapshot (POST-FILL, single source of truth).
+            # Re-fetch account state fresh here rather than reusing the
+            # pre-trade `equity` from Step 1 — fills in Steps 3/4 change it.
+            # Both log_equity() and daily_recorder.record_today() read this
+            # SAME snapshot so live_equity_curve.csv and daily_history.csv
+            # never diverge from being sampled at different moments.
+            print("\n  [6] Equity snapshot (post-fill)")
+            final_account   = self.client.get_account()
+            final_positions = self.client.get_positions()
+            equity = final_account["equity"]
+            results["equity"] = equity
             regime = getattr(self, "_last_regime", "Unknown")
             if not self.dry_run:
                 log_equity(equity, regime)
+                raw_positions = [
+                    {"symbol": p["ticker"], "market_value": p["market_value"],
+                     "unrealized_pl": p["unrealized_pl"],
+                     "unrealized_plpc": p["unrealized_pct"] / 100}
+                    for p in final_positions
+                ]
+                from daily_recorder import record_today
+                record_today(regime_arg=regime, account=final_account,
+                             positions=raw_positions)
             else:
                 print(f"  ✓ Equity (dry-run, not written): ${equity:,.2f} | regime: {regime}")
             results["regime"] = regime
