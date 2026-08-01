@@ -36,6 +36,14 @@ import argparse
 from datetime import date, timedelta
 from typing import Optional, List
 
+# Windows consoles default to cp1252, which can't encode the ═ banner
+# characters used in header() below — force UTF-8 stdout so the script
+# runs without needing PYTHONIOENCODING set externally.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # ── project root ──────────────────────────────────────────────────────────
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)

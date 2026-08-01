@@ -1,0 +1,16 @@
+{
+  "stamp": "2026-07-31_07-30-23",
+  "backup_dir": "D:\\__A Google Drive Project\\virtual_trading_firm\\model_backups\\2026-07-31_07-30-23",
+  "backed": [
+    "4_signals/xgboost_global_model.pkl",
+    "4_signals/models/hardware_model.pkl",
+    "4_signals/models/hypercloud_model.pkl",
+    "4_signals/models/autos_model.pkl",
+    "4_signals/models/defensive_model.pkl",
+    "5_backtesting/results/hmm_detector.pkl"
+  ],
+  "backed_results": [
+    "5_backtesting/results/metrics.json",
+    "5_backtesting/results/equity_curve.csv"
+  ]
+}

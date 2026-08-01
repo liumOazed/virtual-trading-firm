@@ -7,8 +7,8 @@ backtest possible: every snapshot is stamped with the date it was knowable, so
 a future backtest can replay history with zero look-ahead.
 
 Run this right after each `growth_screener.py` run (monthly is plenty):
-  python growth_screener.py                       # produces growth_screen_results.csv
-  python aria_growth_archive_screen.py            # banks a dated copy
+  python growth_screener.py                       # produces growth_screen_results_YYYY-MM.csv
+  python aria_growth_archive_screen.py            # banks a dated copy (auto-finds the latest screen)
 
 Output:
   9_aria_growth/screens/growth_screen_<YYYY-MM-DD>.csv
@@ -20,29 +20,44 @@ is that snapshot N reflects ONLY what was known on date N.
 
 import argparse
 import shutil
+import sys
 from datetime import date
 from pathlib import Path
 import pandas as pd
 
-OUT_DIR = Path("9_aria_growth/screens")
+# Windows console defaults to cp1252, which can't encode the ✓/⚠ glyphs below.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+HERE = Path(__file__).resolve().parent
+OUT_DIR = HERE / "screens"
+
+
+def _find_latest_screen():
+    """Most recent growth_screen_results_*.csv/.xlsx in this folder, else the legacy fixed name."""
+    dated = sorted(HERE.glob("growth_screen_results_*.csv")) + sorted(HERE.glob("growth_screen_results_*.xlsx"))
+    if dated:
+        return sorted(dated, key=lambda p: p.stem)[-1]
+    for name in ("growth_screen_results.csv", "growth_screen_results.xlsx"):
+        if (HERE / name).exists():
+            return HERE / name
+    return None
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--screen", default="growth_screen_results.csv",
-                    help="path to the latest screen (.csv or .xlsx)")
+    ap.add_argument("--screen", default=None,
+                    help="path to the screen (.csv or .xlsx); default: latest "
+                         "growth_screen_results_*.csv in this folder")
     ap.add_argument("--date", default=date.today().isoformat(),
                     help="snapshot date (default: today)")
     args = ap.parse_args()
 
-    src = Path(args.screen)
-    if not src.exists():
-        # try the xlsx the user uploaded
-        alt = Path("growth_screen_results.xlsx")
-        if alt.exists():
-            src = alt
-        else:
-            raise SystemExit(f"Screen not found: {args.screen} (or growth_screen_results.xlsx)")
+    src = Path(args.screen) if args.screen else _find_latest_screen()
+    if not src or not src.exists():
+        raise SystemExit(
+            f"Screen not found: {args.screen or '(none passed)'}\n"
+            f"   Run growth_screener.py first, or pass --screen with the full path.")
 
     df = pd.read_excel(src) if src.suffix == ".xlsx" else pd.read_csv(src)
 

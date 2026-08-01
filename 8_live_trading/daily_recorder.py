@@ -36,7 +36,7 @@ TRADE_LOG  = os.path.join(DATA_DIR, "live_trade_log.csv")
 STATE      = os.path.join(DATA_DIR, "regime_state.json")
 
 INCEPTION_EQUITY = 100_000.0
-INCEPTION_DATE   = "2026-06-01"
+INCEPTION_DATE   = "2026-06-15"
 
 COLS = ["date","equity","cash","deployed_pct","n_positions",
         "daily_pnl","daily_pnl_pct","total_return_pct",
@@ -215,8 +215,8 @@ def _print_row(row):
           f"Unrealized: ${row['unrealized_pnl']:+,.2f}")
     print(f"\n  vs MARKET since inception:")
     print(f"    You:  {row['total_return_pct']:+.2f}%")
-    print(f"    SPY:  {row['spy_ret_since_incept']:+.2f}%   -> alpha {row['alpha_vs_spy']:+.2f}%")
-    print(f"    QQQ:  {row['qqq_ret_since_incept']:+.2f}%   -> alpha {row['alpha_vs_qqq']:+.2f}%")
+    print(f"    SPY:  {row['spy_ret_since_incept']:+.2f}%   -> excess return {row['alpha_vs_spy']:+.2f}%")
+    print(f"    QQQ:  {row['qqq_ret_since_incept']:+.2f}%   -> excess return {row['alpha_vs_qqq']:+.2f}%")
     v="BEATING" if row['alpha_vs_spy']>0 else "TRAILING"
     print(f"    -> {v} SPY by {abs(row['alpha_vs_spy']):.2f}%")
     print(f"\n  + Appended to daily_history.csv")

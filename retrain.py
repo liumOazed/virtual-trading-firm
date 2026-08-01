@@ -6,23 +6,29 @@ gate, and auto-rollback. MANUAL command for now (run it and watch);
 designed to be schedulable later once trusted.
 
 Full retrain = 2 trainers (confirmed interfaces):
-    python 4_signals/xgboost_model.py            → global model + HMM
-    python 4_signals/sector_model_trainer.py --sector all → 5 sector models
+    python 4_signals/xgboost_model.py            → global model only (no HMM)
+    python 4_signals/sector_model_trainer.py --sector all → 4 sector models
 
 Procedure:
-    1. Backup all 7 .pkl files (dated)
+    1. Backup all 6 models + 2 results files (dated)
     2. Capture OLD backtest metrics (baseline)
-    3. Train global + HMM
-    4. Train 5 sectors
+    3. Train global model
+    4. Train 4 sectors
     5. Run backtest → capture NEW metrics
     6. GATE: new vs old within tolerances?
     7. PASS → keep + manifest  |  FAIL → rollback + manifest
     8. Write manifest log
 
 Usage:
-    python retrain.py                # full retrain with gate
+    python retrain.py                # full retrain with gate (local only — needs all deps)
     python retrain.py --dry-run      # backup + show plan, no training
     python retrain.py --skip-gate    # train + keep, NO validation (risky)
+    python retrain.py --train-only   # backup + train ONLY (for Colab GPU — skips
+                                      #   backtest/gate/keep-rollback, which need deps
+                                      #   Colab doesn't have, e.g. feedparser)
+    python retrain.py --gate-only    # skip training; run backtest+gate+keep/rollback
+                                      #   on whatever models are on disk right now
+                                      #   (run this LOCALLY after syncing Colab output)
 
 ╔═══════════════════════════════════════════════════════════════════╗
 ║  TUNING MAP — REVIEW AFTER ~1 MONTH OF LIVE DATA                   ║
@@ -37,6 +43,14 @@ Usage:
 import os, sys, json, shutil, subprocess
 from datetime import datetime
 from pathlib import Path
+
+# Windows consoles default to cp1252, which can't encode the ✓/→/✗ symbols
+# used in log() below — force UTF-8 stdout so the script runs without
+# needing PYTHONIOENCODING set externally.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 
@@ -65,13 +79,13 @@ MODEL_PATHS = [
 # sector_model_trainer.py --sector all writes 4 sectors: hardware, hypercloud,
 #   autos, defensive. (software sector was removed from trainer; legacy pkl ignored.)
 TRAIN_COMMANDS = [
-    ["python", "4_signals/xgboost_model.py"],                            # global model only
-    ["python", "4_signals/sector_model_trainer.py", "--sector", "all"],  # 4 sectors
+    [sys.executable, "4_signals/xgboost_model.py"],                            # global model only
+    [sys.executable, "4_signals/sector_model_trainer.py", "--sector", "all"],  # 4 sectors
 ]
 
 # ── Backtest command (for the validation gate) ──────────────────────────
 # [STABLE] Adjust if run_backtest.py gains/changes flags.
-BACKTEST_COMMAND = ["python", "run_backtest.py"]
+BACKTEST_COMMAND = [sys.executable, "run_backtest.py"]
 
 # ── VALIDATION GATE TOLERANCES ──────────────────────────────────────────
 # [TUNE ★★★] THE most important values to revisit after a month live.
@@ -107,10 +121,24 @@ METRIC_KEYS = {
 # The equity_curve fallback also returns percentages, so the gate ratios
 # compare like-for-like. [TUNE] only matters that old & new use same units.
 
+# ── Backtest results to back up alongside the models ────────────────────
+# [STABLE] These get overwritten by the validation backtest itself, so on
+# ANY rollback (train/backtest/gate failure) they must be restored too —
+# otherwise the rejected retrain's numbers poison the NEXT retrain's
+# baseline via read_metrics().
+RESULTS_PATHS = [METRICS_FILE, EQUITY_CURVE_CSV]
+
 # ── Output locations ────────────────────────────────────────────────────
 # [STABLE]
 BACKUP_ROOT   = "model_backups"
 MANIFEST_LOG  = "model_backups/retrain_manifest.jsonl"   # one line per retrain
+
+# [STABLE] Written by --train-only, read by --gate-only. Points at the
+# backup taken BEFORE the last training run, so a later --gate-only
+# (running in a separate process, possibly on a different machine) knows
+# what to roll back to on gate failure — it never trained anything itself,
+# so it has no "before" snapshot of its own.
+TRAIN_POINTER = "model_backups/last_train_backup.json"
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -123,12 +151,11 @@ def _ts():
 def log(msg, sym="•"):
     print(f"  {sym} {msg}")
 
-def backup_models(stamp):
-    """Copy all current .pkl files to a dated backup folder."""
-    dest = os.path.join(ROOT, BACKUP_ROOT, stamp)
-    os.makedirs(dest, exist_ok=True)
+def _backup_paths(dest, paths, kind):
+    """Copy each existing path in `paths` into `dest` (flat-name copy).
+    Returns the list of rel paths actually backed up."""
     backed = []
-    for rel in MODEL_PATHS:
+    for rel in paths:
         src = os.path.join(ROOT, rel)
         if os.path.exists(src):
             # preserve subfolder structure in backup
@@ -137,18 +164,30 @@ def backup_models(stamp):
             backed.append(rel)
         else:
             log(f"WARNING: {rel} not found — skipping backup", "⚠")
-    log(f"Backed up {len(backed)}/{len(MODEL_PATHS)} models → {dest}", "✓")
-    return dest, backed
+    log(f"Backed up {len(backed)}/{len(paths)} {kind} → {dest}", "✓")
+    return backed
+
+def backup_models(stamp):
+    """Copy all current .pkl models AND backtest results (metrics.json,
+    equity_curve.csv) to a dated backup folder. The results files must be
+    backed up too — they get overwritten by the validation backtest, and
+    any rollback needs to restore them along with the models so the next
+    retrain's baseline isn't poisoned by the rejected run's numbers."""
+    dest = os.path.join(ROOT, BACKUP_ROOT, stamp)
+    os.makedirs(dest, exist_ok=True)
+    backed         = _backup_paths(dest, MODEL_PATHS,   "models")
+    backed_results = _backup_paths(dest, RESULTS_PATHS, "results files")
+    return dest, backed, backed_results
 
 def restore_models(backup_dir, backed):
-    """Roll back: copy backup .pkl files over the live ones."""
+    """Roll back: copy backed-up files (models or results) over the live ones."""
     for rel in backed:
         flat = rel.replace("/", "__").replace("\\", "__")
         src = os.path.join(backup_dir, flat)
         dst = os.path.join(ROOT, rel)
         if os.path.exists(src):
             shutil.copy2(src, dst)
-    log(f"Restored {len(backed)} models from {backup_dir}", "↩")
+    log(f"Restored {len(backed)} file(s) from {backup_dir}", "↩")
 
 def read_metrics():
     """Read backtest metrics. Prefers canonical metrics.json; falls back
@@ -194,9 +233,18 @@ def read_metrics():
         log(f"failed to compute metrics from equity_curve: {e}", "⚠")
         return None
 
-def run_cmd(cmd, label):
+def run_cmd(cmd, label, timeout=7200):
     log(f"running: {' '.join(cmd)}", "▶")
-    result = subprocess.run(cmd, cwd=ROOT)
+    # Windows consoles default to cp1252 for a child's stdout, which chokes
+    # on Unicode banner/symbol prints (═, ✓, →, …) in the scripts we launch
+    # (e.g. run_backtest.py's header()). Force UTF-8 for every subprocess.
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:
+        result = subprocess.run(cmd, cwd=ROOT, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        log(f"{label} TIMED OUT (>{timeout}s) — treating as failure", "✗")
+        return False
     if result.returncode != 0:
         log(f"{label} FAILED (exit {result.returncode})", "✗")
         return False
@@ -247,22 +295,138 @@ def write_manifest(entry):
         f.write(json.dumps(entry) + "\n")
     log(f"manifest updated → {MANIFEST_LOG}", "✓")
 
+def write_train_pointer(stamp, backup_dir, backed, backed_results):
+    """Record where --train-only backed up the PRE-training models, so a
+    later --gate-only run (no training of its own) knows what to restore
+    on gate failure."""
+    path = os.path.join(ROOT, TRAIN_POINTER)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({"stamp": stamp, "backup_dir": backup_dir,
+                    "backed": backed, "backed_results": backed_results}, f, indent=2)
+    log(f"train pointer written → {TRAIN_POINTER}", "✓")
+
+def read_train_pointer():
+    path = os.path.join(ROOT, TRAIN_POINTER)
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
 
 def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="backup + plan, no training")
     ap.add_argument("--skip-gate", action="store_true", help="train+keep, NO validation")
+    ap.add_argument("--train-only", action="store_true",
+                     help="backup + train ONLY (for Colab GPU); skips backtest/gate/keep-rollback")
+    ap.add_argument("--gate-only", action="store_true",
+                     help="skip training; run backtest+gate+keep/rollback on models on disk now (run locally)")
     args = ap.parse_args()
 
+    if args.train_only and args.gate_only:
+        ap.error("--train-only and --gate-only are mutually exclusive")
+    if args.skip_gate and (args.train_only or args.gate_only):
+        ap.error("--skip-gate doesn't combine with --train-only/--gate-only "
+                 "(--train-only already skips the gate; --gate-only IS the gate)")
+
     stamp = _ts()
+    mode = ("DRY RUN" if args.dry_run else
+            "TRAIN-ONLY" if args.train_only else
+            "GATE-ONLY" if args.gate_only else
+            "NO-GATE" if args.skip_gate else "FULL + GATE")
     print("="*64)
     print(f"  ARIA RETRAIN ORCHESTRATOR — {stamp}")
-    print(f"  mode: {'DRY RUN' if args.dry_run else ('NO-GATE' if args.skip_gate else 'FULL + GATE')}")
+    print(f"  mode: {mode}")
     print("="*64)
 
+    # ── --train-only: backup + train, nothing else. Does not touch
+    #    metrics.json/equity_curve.csv at all. ──────────────────────────
+    if args.train_only:
+        backup_dir, backed, backed_results = backup_models(stamp)
+        write_train_pointer(stamp, backup_dir, backed, backed_results)
+
+        if args.dry_run:
+            print("\n  DRY RUN — would now train:")
+            for c in TRAIN_COMMANDS: print(f"    {' '.join(c)}")
+            print("  (--train-only: no backtest/gate would follow). No changes made.")
+            return
+
+        for cmd in TRAIN_COMMANDS:
+            if not run_cmd(cmd, "train"):
+                log("training failed — rolling back", "✗")
+                restore_models(backup_dir, backed)
+                restore_models(backup_dir, backed_results)
+                write_manifest({"stamp": stamp, "result": "TRAIN_FAILED", "backup": backup_dir})
+                return
+
+        write_manifest({"stamp": stamp, "result": "TRAIN_ONLY_DONE", "backup": backup_dir})
+        print("\n" + "="*64)
+        print("  TRAINING COMPLETE — models saved, NOT validated.")
+        print("  Run `python retrain.py --gate-only` locally to validate these models")
+        print("  against a fresh backtest before trusting them.")
+        print("="*64)
+        return
+
+    # ── --gate-only: no training. Backtest + gate + keep/rollback against
+    #    whatever models are on disk right now. Rollback target is the
+    #    backup a prior --train-only run left behind (via TRAIN_POINTER),
+    #    since this process never trained anything itself. ──────────────
+    if args.gate_only:
+        pointer = read_train_pointer()
+        if pointer:
+            backup_dir  = pointer["backup_dir"]
+            backed      = pointer["backed"]
+            backed_results = pointer["backed_results"]
+            log(f"rollback target (from --train-only pointer): {backup_dir}", "•")
+        else:
+            log("no --train-only pointer found — taking a fresh backup now; "
+                "rollback would restore the CURRENT (untrained-against) state, not a validated prior state", "⚠")
+            backup_dir, backed, backed_results = backup_models(stamp)
+
+        old_metrics = read_metrics()
+        log(f"baseline metrics: {old_metrics}", "•")
+
+        if args.dry_run:
+            print(f"\n  DRY RUN — would now run: {' '.join(BACKTEST_COMMAND)}")
+            print("  then gate against baseline above. No changes made.")
+            return
+
+        if not run_cmd(BACKTEST_COMMAND, "backtest"):
+            log("backtest failed — rolling back", "✗")
+            restore_models(backup_dir, backed)
+            restore_models(backup_dir, backed_results)
+            write_manifest({"stamp": stamp, "result": "BACKTEST_FAILED", "backup": backup_dir})
+            return
+        new_metrics = read_metrics()
+
+        passed, report = evaluate_gate(old_metrics, new_metrics)
+        print("\n  VALIDATION GATE:")
+        for line in report: print(f"    {line}")
+
+        if passed:
+            log("GATE PASSED — keeping models currently on disk", "✓")
+            result = "PASS_KEPT_NEW"
+        else:
+            log("GATE FAILED — rolling back", "✗")
+            restore_models(backup_dir, backed)
+            restore_models(backup_dir, backed_results)
+            result = "FAIL_ROLLED_BACK"
+
+        write_manifest({
+            "stamp": stamp, "result": result, "backup": backup_dir,
+            "old_metrics": old_metrics, "new_metrics": new_metrics, "gate": GATE,
+        })
+        print("\n" + "="*64)
+        print(f"  GATE-ONLY COMPLETE — {result}")
+        print("="*64)
+        return
+
+    # ── default (no flag) / --dry-run / --skip-gate: original all-in-one
+    #    flow, unchanged. ────────────────────────────────────────────────
     # 1. Backup
-    backup_dir, backed = backup_models(stamp)
+    backup_dir, backed, backed_results = backup_models(stamp)
 
     # 2. Old metrics (baseline)
     old_metrics = read_metrics()
@@ -279,6 +443,7 @@ def main():
         if not run_cmd(cmd, "train"):
             log("training failed — rolling back", "✗")
             restore_models(backup_dir, backed)
+            restore_models(backup_dir, backed_results)
             write_manifest({"stamp": stamp, "result": "TRAIN_FAILED",
                             "backup": backup_dir})
             return
@@ -288,6 +453,7 @@ def main():
         if not run_cmd(BACKTEST_COMMAND, "backtest"):
             log("backtest failed — rolling back", "✗")
             restore_models(backup_dir, backed)
+            restore_models(backup_dir, backed_results)
             write_manifest({"stamp": stamp, "result": "BACKTEST_FAILED",
                             "backup": backup_dir})
             return
@@ -305,6 +471,7 @@ def main():
         else:
             log("GATE FAILED — rolling back to old models", "✗")
             restore_models(backup_dir, backed)
+            restore_models(backup_dir, backed_results)
             result = "FAIL_ROLLED_BACK"
     else:
         log("GATE SKIPPED (--skip-gate) — new models kept unvalidated", "⚠")

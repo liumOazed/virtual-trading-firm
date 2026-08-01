@@ -24,7 +24,7 @@ Each regime ranks the universe by a regime-fit score, applies a per-sector cap
 so you're not 60% tech, and equal-weights the top N (robust default for a
 forward tool — no weight-overfitting on a single snapshot).
 
-Inputs : growth_screen_results.xlsx  (your screen)
+Inputs : latest growth_screen_results_*.csv in this folder (your screen)
 Output : console portfolio + 9_aria_growth/portfolio_<REGIME>.csv
 
 Usage:
@@ -41,14 +41,28 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Windows console defaults to cp1252, which can't encode the ✓/⚠ glyphs below.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
-SCREEN_PATH   = Path("growth_screen_results.csv")
-OUT_DIR       = Path("9_aria_growth")
+OUT_DIR       = Path(__file__).resolve().parent
 DEFAULT_N     = 20
 MAX_PER_SECTOR = 4
+
+
+def _find_latest_screen():
+    """Most recent growth_screen_results_*.csv/.xlsx in this folder, else the legacy fixed name."""
+    dated = sorted(OUT_DIR.glob("growth_screen_results_*.csv")) + sorted(OUT_DIR.glob("growth_screen_results_*.xlsx"))
+    if dated:
+        return sorted(dated, key=lambda p: p.stem)[-1]
+    for name in ("growth_screen_results.csv", "growth_screen_results.xlsx"):
+        if (OUT_DIR / name).exists():
+            return OUT_DIR / name
+    return None
 
 # Regime detection thresholds (on SPY)
 VOL_CALM      = 0.18      # annualized realized vol below this = calm
@@ -170,7 +184,8 @@ def main():
                     help="force a regime (skip SPY detection) for inspection")
     ap.add_argument("--n", type=int, default=DEFAULT_N)
     ap.add_argument("--max-per-sector", type=int, default=MAX_PER_SECTOR)
-    ap.add_argument("--screen", default=str(SCREEN_PATH))
+    ap.add_argument("--screen", default=None,
+                    help="path to screen csv/xlsx; default: latest growth_screen_results_*.csv in this folder")
     args = ap.parse_args()
 
     print("=" * 70)
@@ -178,9 +193,13 @@ def main():
     print("  [!] Rules-based portfolio, NOT a backtested strategy (current snapshot)")
     print("=" * 70)
 
-    p = Path(args.screen)
+    p = Path(args.screen) if args.screen else _find_latest_screen()
+    if not p or not p.exists():
+        raise SystemExit(
+            "Screen file not found. Run growth_screener.py first, or pass --screen "
+            "with the full path to your growth_screen_results csv/xlsx.")
     df = pd.read_csv(p) if p.suffix.lower() == ".csv" else pd.read_excel(p)
-    print(f"\n  Loaded screen: {len(df)} stocks")
+    print(f"\n  Loaded screen: {p.name} ({len(df)} stocks)")
 
     if args.regime:
         regime = args.regime

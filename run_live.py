@@ -20,8 +20,9 @@ What it does each day:
   4. Execute paper orders via Alpaca API
   5. Log trades to 8_live_trading/data/live_trade_log.csv
   6. Log equity to 8_live_trading/data/live_equity_curve.csv
-  7. Print daily summary
-  8. (optional) Run Groq daily briefing
+  7. Reconcile any previously-estimated fills that have since settled
+  8. Print daily summary
+  9. (optional) Run Groq daily briefing
 """
 
 import os
@@ -139,9 +140,19 @@ def cmd_run(dry_run: bool = False, explain: bool = False):
     engine  = LiveEngine(dry_run=dry_run, verbose=True)
     results = engine.run()
 
+    # Reconcile any previously-estimated fills that have since settled
+    if not dry_run:
+        step(7, "Reconciling estimated fills")
+        try:
+            from reconcile_trade_log import reconcile
+            n = reconcile(client=client)
+            ok(f"{n} row(s) corrected" if n else "Nothing to reconcile")
+        except Exception as e:
+            warn(f"Reconcile failed: {e}")
+
     # Optional Groq explainer
     if explain and not dry_run:
-        step(7, "Groq daily briefing")
+        step(8, "Groq daily briefing")
         try:
             from groq_explainer import GroqExplainer, DataLoader
             loader    = DataLoader(

@@ -36,6 +36,10 @@ from pathlib import Path
 import requests
 import pandas as pd
 
+# Windows console defaults to cp1252, which can't encode the ✓/⚠ glyphs below.
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Reuse the validated allocator logic (same directory)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
@@ -50,10 +54,21 @@ except ImportError:
 # CONFIG
 # ══════════════════════════════════════════════════════════════════════════════
 PAPER_BASE   = "https://paper-api.alpaca.markets"
-SCREEN_PATH  = "growth_screen_results.csv"   # your screener's native output
-OUT_DIR      = Path("9_aria_growth")
+SCREEN_PATH  = None   # auto-detected: latest growth_screen_results_*.csv in this folder
+OUT_DIR      = Path(__file__).resolve().parent
 STATE_FILE   = OUT_DIR / "executor_state.json"
 TRADE_LOG    = OUT_DIR / "growth_trade_log.csv"
+
+
+def _find_latest_screen():
+    """Most recent growth_screen_results_*.csv/.xlsx in this folder, else the legacy fixed name."""
+    dated = sorted(OUT_DIR.glob("growth_screen_results_*.csv")) + sorted(OUT_DIR.glob("growth_screen_results_*.xlsx"))
+    if dated:
+        return sorted(dated, key=lambda p: p.stem)[-1]
+    for name in ("growth_screen_results.csv", "growth_screen_results.xlsx"):
+        if (OUT_DIR / name).exists():
+            return OUT_DIR / name
+    return None
 
 # ── HARD SAFETY GUARD ─────────────────────────────────────────────────────────
 # The growth book MUST run on the Zed2 paper account, never ARIA's. The executor
@@ -203,20 +218,21 @@ def load_target(regime, screen_path, n, max_sec, deploy_dollars, exclude=None,
                best-ranked names to keep N holdings.
     """
     exclude = exclude or set()
-    # Resolve the screen file from likely locations (run-dir, project root, script dir)
-    p = Path(screen_path)
-    if not p.exists():
-        here = Path(__file__).resolve().parent
-        for cand in [Path.cwd() / p.name, here / p.name, here.parent / p.name,
-                     Path.cwd() / "growth_screen_results.csv",
-                     Path.cwd() / "growth_screen_results.xlsx"]:
+    # Resolve the screen file: explicit --screen (with cwd/script-dir fallbacks), else the
+    # latest dated growth_screen_results_*.csv in this folder.
+    p = Path(screen_path) if screen_path else None
+    if p and not p.exists():
+        for cand in (Path.cwd() / p.name, OUT_DIR / p.name, OUT_DIR.parent / p.name):
             if cand.exists():
                 p = cand
                 break
-    if not p.exists():
+    if not p or not p.exists():
+        p = _find_latest_screen()
+    if not p or not p.exists():
         raise SystemExit(
-            f"Screen file not found: {screen_path}\n"
-            f"   Pass --screen with the full path to your growth_screen_results.csv/.xlsx")
+            f"Screen file not found: {screen_path or '(none passed)'}\n"
+            f"   Run growth_screener.py first, or pass --screen with the full path to "
+            f"your growth_screen_results csv/xlsx.")
     df = pd.read_excel(p) if p.suffix == ".xlsx" else pd.read_csv(p)
     ranked = regime_fit(df, regime)
     if backfill:
@@ -241,7 +257,8 @@ def main():
     ap.add_argument("--n", type=int, default=N_HOLDINGS)
     ap.add_argument("--max-per-sector", type=int, default=MAX_PER_SECTOR)
     ap.add_argument("--deploy", type=float, default=DEPLOY_FRACTION)
-    ap.add_argument("--screen", default=SCREEN_PATH)
+    ap.add_argument("--screen", default=SCREEN_PATH,
+                    help="path to screen csv/xlsx; default: latest growth_screen_results_*.csv in this folder")
     ap.add_argument("--reset-stops", action="store_true",
                     help="clear the stop-loss blocklist (run after a monthly re-screen)")
     ap.add_argument("--stop-pct", type=float, default=STOP_LOSS_PCT,

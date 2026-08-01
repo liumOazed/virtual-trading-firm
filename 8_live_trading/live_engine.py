@@ -287,7 +287,18 @@ class PositionReconciler:
                             order["filled_qty"]       = fq
                             order["price_estimated"]  = False
                         else:
+                            # Fill never confirmed within the poll window — real cash
+                            # (notional) was still spent, so never leave qty at the
+                            # stale order-submission default of 0. Estimate from
+                            # notional/signal price, same floor _await_fill already
+                            # uses internally, and flag it for reconciliation.
+                            est_price = sig.get("price") or 0
+                            order["filled_avg_price"] = est_price
+                            order["filled_qty"] = round(notional / est_price, 6) if est_price else 0.0
                             order["price_estimated"] = True
+                            print(f"    ⚠ {ticker}: fill never confirmed — estimated qty="
+                                  f"{order['filled_qty']:.6f} from notional/signal price "
+                                  f"(flagged price_estimated, needs reconciliation)")
                     else:
                         order["price_estimated"] = True
                     orders.append(order)
@@ -308,9 +319,10 @@ class PositionReconciler:
         return orders
 
     def _await_fill(self, order_id: str, ticker: str,
-                    retries: int = 5, interval: float = 2.0,
+                    retries: int = 8, interval: float = 2.5,
                     notional: float = 0.0):
-        """Poll Alpaca until both filled_avg_price AND filled_qty > 0.
+        """Poll Alpaca until the order status is fully 'filled' (not just
+        partially_filled with a nonzero interim qty/price).
         Returns (price, qty, confirmed). Fallback chain ensures qty is never 0.
 
         Fallback order when retries exhaust with price confirmed but qty=0:
@@ -328,12 +340,16 @@ class PositionReconciler:
                 fq = o.get("filled_qty") or o.get("qty")  # get_order normalizes Alpaca's filled_qty to "qty"
                 if fp:
                     last_price = float(fp)
-                if fp and fq and float(fq) > 0:
+                # Require the order to be FULLY filled — a partially_filled order
+                # can report a valid interim price/qty (e.g. 9 of 33.6 shares on a
+                # large fractional order), and locking that in as "the fill"
+                # silently drops the rest of the shares from the trade log.
+                if o.get("status") == "filled" and fp and fq and float(fq) > 0:
                     price, qty = float(fp), float(fq)
-                    print(f"    ✓ {ticker} fill confirmed: "
+                    print(f"    ✓ {ticker} fill confirmed (status=filled): "
                           f"${price:.4f} × {qty:.6f} sh (attempt {attempt+1}/{retries})")
                     return price, qty, True
-                # price arrived but qty still 0 — keep polling
+                # still pending / partially_filled — keep polling
             except Exception as e:
                 print(f"    fill poll error [{ticker}]: {e}")
 
