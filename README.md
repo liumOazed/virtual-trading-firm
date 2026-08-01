@@ -503,33 +503,28 @@ from the latest generated reports. **Sample-size caveat applies to both:**
 a few weeks of live data verifies the machinery and shows behavior; it
 cannot prove or disprove an edge validated over years of backtest.
 
-### ARIA-Momentum (17 trading days since 2026-06-16)
+### ARIA-Momentum (35 trading days since 2026-06-16)
 
 | Metric                | Book       | SPY    | QQQ    |
 | ---------------------- | ---------- | ------ | ------ |
-| Return since inception | **+1.69%** | -1.73% | -4.21% |
-| Alpha                  | —          | +3.42pp | +5.90pp |
+| Return since inception | **+2.05%** | -1.03% | -7.53% |
+| Alpha                  | —          | +3.08pp | +9.58pp |
 
-Sharpe **4.05** · Sortino **10.19** · Calmar 22.21 · ann. return +26.5% ·
-ann. vol 6.5% · max drawdown **-1.19%** (backtest budget -6.82%) · hit rate
-47% (7W/8L) · best day +0.95% · worst -0.61%. All 17 days so far have traded
-in a single regime (Bull-Stable).
+Sharpe **1.70** · Sortino **3.95** · Calmar 6.75 · ann. return +8.1% ·
+ann. vol 4.7% · max drawdown **-1.19%** (backtest budget -6.82%) · beta vs
+SPY 0.12 (corr 0.28) · up-capture 20% / down-capture 7% · hit rate 43%
+(12W/16L) · best day +0.95% · worst -0.61% · avg capital deployed 26%. All
+35 days so far have traded in a single regime (Bull-Stable).
 
-**Why Sharpe/Sortino look inflated:** these are annualized by multiplying
-the daily mean/vol by √252 — a scaling built for a full year of data, not
-17 days. With only one regime observed, no losing streak worse than -0.61%,
-and annualized vol sitting at just 6.5% (backtest Bull-Stable ran at
-~20%+), the ratio comes out several times higher than the locked backtest's
-Bull-Stable Sharpe of 1.35. This is a mechanical small-sample artifact, not
-a claim the live engine is outperforming the backtest by 3x — it will
-compress toward the backtest's regime-level numbers as more days, losing
-streaks, and regime transitions accumulate. (These numbers were also
-re-verified against a data-quality fix on 2026-07-09: a corrupted
-`daily_pnl_pct` row and 8 dates where `daily_history.csv` had drifted from
-the hand-reconciled `live_equity_curve.csv` were corrected, and the root
-cause — `live_engine.py` logging pre-fill equity while `daily_recorder.py`
-ran as a fully separate, unsynced process — was fixed so both files now
-share one post-fill equity snapshot per day.)
+**Live vs backtest, same regime:** Bull-Stable live ann. return +8.1% vs
+the locked backtest's +26.2% for that regime, live Sharpe 1.70 vs backtest
+1.33, live max DD -1.19% vs backtest -6.72%. The mechanical small-sample
+inflation flagged in the prior report (4.05 vs the backtest's 1.35 at 17
+days) is compressing as predicted — live Sharpe has come down to 1.70,
+much closer to backtest's regime-level 1.33 — though ann. vol (4.7% vs
+backtest's ~20%+ in Bull-Stable) shows there's still room to converge. 10
+closed round trips this period: 5W/5L, losers avg hold 4.8d (fast loser
+exits = min-hold design working), winners avg hold 8.0d.
 
 ### ARIA-Growth (20 trading days since go-live 2026-06-09, Zed2 account)
 
