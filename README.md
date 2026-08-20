@@ -24,6 +24,229 @@ reliability, and building complementary strategies.
 - **ARIA-Growth — regime-switching growth rotation, live paper on a SEPARATE
   Alpaca account (Zed2), since 2026-06-09** (forward tool, not yet validated)
 
+  ## ARIA Momentum — Execution Pipeline
+
+The daily cycle, top to bottom. Click any step to expand it.
+
+```mermaid
+flowchart TD
+    A["run_live.py<br/><small>guard: is_trading_day()</small>"] --> B["1–2 · State and prices<br/><small>Alpaca account, 5-day top-up</small>"]
+    B --> C["3 · Signal generation<br/><small>regime, models, gate, exits</small>"]
+    C --> D["4 · Order execution<br/><small>sells first, then buys</small>"]
+    D --> E["5–6 · Log and snapshot<br/><small>trades, equity, daily history</small>"]
+    E --> F["7 · Reconciliation<br/><small>fixes estimated fills</small>"]
+    F --> G["8 · Groq briefing<br/><small>--explain only</small>"]
+
+    classDef entry fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    classDef data fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    classDef core fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    classDef exec fill:#FAECE7,stroke:#993C1D,color:#4A1B0C
+    classDef log fill:#E6F1FB,stroke:#185FA5,color:#042C53
+
+    class A,G entry
+    class B data
+    class C core
+    class D exec
+    class E,F log
+```
+
+<details>
+<summary><b>1–2 · Account state and price top-up</b></summary>
+
+<br/>
+
+**Step 1 — Account state**
+`AlpacaClient.get_account()` and `get_positions()` return equity, cash, and open positions.
+
+**Step 2 — Price data top-up**
+`LiveDataFeed.top_up(days=5)` → `AlpacaClient.get_bars_multi()` → merges into `8_live_trading/data/live_price_data.pkl`.
+
+Structure: `{ticker: {open, high, low, close, volume: pd.Series}}` covering the 16 tradable names plus `SPY` and `IEF` for the HMM.
+
+If a live ticker fetch fails, `LiveDataFeed._fill_from_backtest()` falls back to `5_backtesting/results/price_data.pkl`.
+
+</details>
+
+<details>
+<summary><b>3 · Signal generation — the decision engine</b></summary>
+
+<br/>
+
+Runs inside `LiveEngine._generate_signals()`. Three phases:
+
+**Phase 1 — setup and regime**
+
+- Load `live_price_data.pkl`, determine `last_bar_date` (most recent _closed_ bar).
+- Update bars-held counter from `position_hold_state.json` — idempotent per calendar day, so a second run on the same date won't double-increment.
+- HMM regime detection: loads pretrained `GaussianHMMRegimeDetector` from `hmm_detector.pkl`. Only `get_regime()` runs live — no fit or refit, the regime lens stays frozen. Returns `Bear-Stress` / `Bear-Stable` / `Bull-Stable` / `Bull-Trending`. Flip state persists in `regime_state.json`.
+
+**Phase 2 — per-ticker probability**
+
+```mermaid
+flowchart TD
+    F["Feature builder<br/><small>yfinance OHLCV, 400-day lookback</small>"] --> E["ESN reservoir<br/><small>252-bar window, PCA states</small>"]
+    E --> S["Five specialists<br/><small>frozen, offline-trained</small>"]
+    E --> M["Macro context<br/><small>cross-asset, inflation</small>"]
+    S --> V["Meta-vector<br/><small>20 dimensions</small>"]
+    M --> V
+    V --> P["Meta-learner<br/><small>returns proba_buy</small>"]
+
+    classDef neutral fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
+    classDef teal fill:#E1F5EE,stroke:#0F6E56,color:#04342C
+    classDef purple fill:#EEEDFE,stroke:#534AB7,color:#26215C
+    classDef blue fill:#E6F1FB,stroke:#185FA5,color:#042C53
+    classDef coral fill:#FAECE7,stroke:#993C1D,color:#4A1B0C
+
+    class F neutral
+    class E teal
+    class S,V purple
+    class M blue
+    class P coral
+```
+
+Three things worth knowing about this stack:
+
+- **The feature builder fetches its own data.** `build_features()` calls `fetch_ohlcv()` which pulls directly from yfinance — independent of the Alpaca-sourced `live_price_data.pkl`. Two price sources in one run.
+- **Sentiment is hardcoded to `0.0`.** `finbert_sentiment.get_sentiment` is imported but never called live (generic non-ticker news created OOD noise). The dead import is what crashes the backtest on machines without `feedparser`.
+- **The specialists are frozen.** Five sub-models (`mean_rev`, `vol`, `momentum`, `structure`, `esn`), each scoped to its own feature subset. Their outputs concatenate with `hurst`, `vol_regime`, 3 cross-asset features, 8 ESN-PCA latent dims and 2 inflation features → 20-dim meta-vector.
+
+**Phase 3 — decision rules**, in firing order:
+
+| Rule             | Behaviour                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Sector overwrite | Sector model's proba + native threshold replaces the global proba where the sector is active **or** the ticker is held |
+| Regime gate      | `REGIME_TO_SECTORS` filters eligible tickers; `AAPL`/`QQQ` bypass as permanent anchors                                 |
+| Sell checks      | Threshold = `sector_threshold × 0.80` (else 0.45). **Gate-independent** — a held position can always exit              |
+| Min-hold guard   | `MIN_HOLD_BARS=3` skips the sell only if the position is **both** profitable **and** held < 3 bars                     |
+| TSLA override    | Independent RSI(14) + price-vs-MA200 rules, bypassing the ML stack entirely                                            |
+| Buy threshold    | Sector-native if available, else regime default (0.50 / 0.52 / 0.58); META overrides to 0.48 in Bull-Trending          |
+| Position sizing  | Bull-Trending 18%, Bull-Stable 12%, Bear-Stable 10%, Bear-Stress 8% of equity                                          |
+| Anchor re-entry  | On confirmed Bear→Bull flip, force-buys `AAPL`/`QQQ` at 22–24% (size depends on prior bear length)                     |
+
+**Regime → sector gate**
+
+| Regime                    | Active sectors        | Tradable tickers                 |
+| ------------------------- | --------------------- | -------------------------------- |
+| Bull-Trending             | hardware, autos, gold | NVDA, AVGO, TSM, TSLA, RACE, GLD |
+| Bull-Stable               | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
+| Bear-Stable / Bear-Stress | defensive, gold       | XOM, CVX, PG, WMT, GLD           |
+
+`AAPL` and `QQQ` trade in every regime via the global model.
+
+Finally, the updated `position_hold_state.json` is written — this is what carries the bars-held counter to tomorrow's run.
+
+</details>
+
+<details>
+<summary><b>4 · Order execution</b></summary>
+
+<br/>
+
+Handled by `PositionReconciler` in `live_engine.py`.
+
+**Sells run first** (to free cash) → `AlpacaClient.close_position()` → `_await_fill()` polls `get_order()` with a fallback chain: notional ÷ price → position-snapshot qty → price-only. A fill is never silently dropped.
+
+**Then account refresh** → `execute_buys(buy_signals, available_cash)` → `AlpacaClient.place_order(notional=...)` with a 95% cash buffer, skipping tickers already held. Same `_await_fill()` treatment.
+
+Any fill that can't be confirmed in the retry window is flagged `price_estimated=True` and corrected later by step 7.
+
+</details>
+
+<details>
+<summary><b>5–6 · Trade logging and equity snapshot</b></summary>
+
+<br/>
+
+**Step 5** — `LiveTradeLogger.log_order()` appends to `live_trade_log.csv`.
+
+**Step 6** — post-fill, single source of truth: a fresh `get_account()` / `get_positions()` feeds both writers so they can't disagree:
+
+- `log_equity()` → `live_equity_curve.csv`
+- `daily_recorder.record_today()` → `daily_history.csv` (equity, cash, deployed %, daily/total P&L, realized/unrealized split, regime, SPY/QQQ comparison, alpha vs market)
+
+</details>
+
+<details>
+<summary><b>7 · Reconciliation</b></summary>
+
+<br/>
+
+`reconcile_trade_log.reconcile()` re-fetches any row flagged `price_estimated=True` from Alpaca and overwrites price and shares once the order has actually settled.
+
+This is the self-healing layer: a transient network blip or API timeout during execution becomes a flagged row, not a permanent silent mismatch. It runs automatically every day as part of the normal flow.
+
+</details>
+
+<details>
+<summary><b>8 · Groq briefing (--explain only)</b></summary>
+
+<br/>
+
+`GroqExplainer.daily_briefing()`, fed by `DataLoader(trade_file=live_trade_log.csv, equity_file=live_equity_curve.csv)` → builds a trade table, adds FinBERT sentiment (news pulled live from yfinance, not cached), calls the Groq LLM, then `save_report()`.
+
+Only runs when invoked with `--explain`.
+
+</details>
+
+<details>
+<summary><b>Data artifacts — source of truth per file</b></summary>
+
+<br/>
+
+| File                                       | Written by                             | Read by                                            |
+| ------------------------------------------ | -------------------------------------- | -------------------------------------------------- |
+| `data/live_price_data.pkl`                 | `LiveDataFeed.top_up` / `full_refresh` | `_generate_signals`, HMM detector                  |
+| `results/hmm_detector.pkl`                 | offline training                       | `LiveEngine` (inference only)                      |
+| `xgboost_global_model.pkl`, `models/*.pkl` | offline training                       | `SignalEngine`, `SectorSignalEngine`               |
+| `data/position_hold_state.json`            | `LiveEngine`                           | `LiveEngine` (min-hold guard)                      |
+| `data/regime_state.json`                   | `LiveEngine`                           | `LiveEngine`, `--status`, `status_report.py`       |
+| `data/live_trade_log.csv`                  | `LiveTradeLogger.log_order`            | reconciler, status, recorder, explainer, month-end |
+| `data/live_equity_curve.csv`               | `log_equity()`                         | explainer, month-end, recorder backfill            |
+| `data/daily_history.csv`                   | `daily_recorder.record_today`          | `aria_momentum_month_end.py`                       |
+| `results/price_data.pkl`                   | offline backtest                       | fallback only, if a live fetch fails               |
+
+</details>
+
+<details>
+<summary><b>CLI modes</b></summary>
+
+<br/>
+
+| Flag        | Function                | What runs                                   |
+| ----------- | ----------------------- | ------------------------------------------- |
+| _(none)_    | `cmd_run()`             | Full daily cycle                            |
+| `--dry-run` | `cmd_run(dry_run=True)` | Signals generated, no orders placed         |
+| `--explain` | `cmd_run(explain=True)` | Adds Groq briefing after trading            |
+| `--status`  | `cmd_status()`          | Account/position snapshot only              |
+| `--refresh` | `cmd_refresh()`         | Full 252-day price history rebuild          |
+| `--reset`   | `cmd_reset()`           | Closes all positions (manual balance reset) |
+
+Default daily run skips entirely on weekends and holidays via `AlpacaClient.is_trading_day()`, unless `--dry-run`.
+
+</details>
+
+<details>
+<summary><b>Scope — what is <i>not</i> in the live path</b></summary>
+
+<br/>
+
+| Folder             | Live                                                                                                                                                                                                                      | Offline / unrelated                                                                                                                                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1_infrastructure` | —                                                                                                                                                                                                                         | all (TradingAgents test scaffolding)                                                                                                                                                                    |
+| `2_agents`         | —                                                                                                                                                                                                                         | all (TradingAgents test scaffolding)                                                                                                                                                                    |
+| `3_market_data`    | `advanced_price_features.py`                                                                                                                                                                                              | `local_indicators.py`, `news_patch.py`                                                                                                                                                                  |
+| `4_signals`        | `signal_engine`, `sector_signal_engine`, `feature_builder`, `xgboost_model` (inference only), `cross_asset_signals`, `inflation_signals`, `hmm_regime` (`get_regime` only), `rc_temporal` (`EchoStateNetwork` class only) | `factor_engine`, `realized_covariance`, `structural_break`, `tail_risk_hedger`, `regime_selector`, `sector_model_trainer`, `mr_*`, `finbert_sentiment` (imported, never called), all training functions |
+| `5_backtesting`    | `results/hmm_detector.pkl` + `results/price_data.pkl` as **files only**                                                                                                                                                   | `backtest_engine_v2.py` and all other code — never imported live                                                                                                                                        |
+| `6_rl_agent`       | —                                                                                                                                                                                                                         | all (research/training, not wired to live)                                                                                                                                                              |
+| `7_explainer`      | `groq_explainer.py` (`--explain` only)                                                                                                                                                                                    | —                                                                                                                                                                                                       |
+| `8_live_trading`   | `live_engine`, `alpaca_client`, `live_data_feed`, `daily_recorder`, `reconcile_trade_log`, `status_report`                                                                                                                | `aria_momentum_month_end.py` (manual), `live_engine_backup.py` (dead)                                                                                                                                   |
+
+> Two stale docstrings to ignore: `live_engine.py`'s header claims it runs `BacktestEngineV2`'s signal pipeline and reuses an RL callback hook. Neither is true — the live engine reimplements signal generation directly and has zero dependency on `5_backtesting/` or `6_rl_agent/`.
+
+Also standalone: `aria_momentum_month_end.py` is a read-only monthly review, run manually. It reads only the three CSVs — no Alpaca or yfinance calls — and outputs to `month_end/<YYYY-MM>/`. `run_live.py` never invokes it.
+
+</details>
+
 **What's in development:**
 
 - Growth point-in-time backtest — accumulating monthly screen snapshots toward
@@ -505,9 +728,9 @@ cannot prove or disprove an edge validated over years of backtest.
 
 ### ARIA-Momentum (35 trading days since 2026-06-16)
 
-| Metric                | Book       | SPY    | QQQ    |
-| ---------------------- | ---------- | ------ | ------ |
-| Return since inception | **+2.05%** | -1.03% | -7.53% |
+| Metric                 | Book       | SPY     | QQQ     |
+| ---------------------- | ---------- | ------- | ------- |
+| Return since inception | **+2.05%** | -1.03%  | -7.53%  |
 | Alpha                  | —          | +3.08pp | +9.58pp |
 
 Sharpe **1.70** · Sortino **3.95** · Calmar 6.75 · ann. return +8.1% ·
@@ -528,10 +751,10 @@ exits = min-hold design working), winners avg hold 8.0d.
 
 ### ARIA-Growth (20 trading days since go-live 2026-06-09, Zed2 account)
 
-| Metric                | Book       | SPY    | QQQ    |
-| ---------------------- | ---------- | ------ | ------ |
-| Return since go-live    | **+1.44%** | +1.11% | +0.51% |
-| Alpha                   | —          | +0.33pp | +0.93pp |
+| Metric               | Book       | SPY     | QQQ     |
+| -------------------- | ---------- | ------- | ------- |
+| Return since go-live | **+1.44%** | +1.11%  | +0.51%  |
+| Alpha                | —          | +0.33pp | +0.93pp |
 
 Sharpe **0.82** · Sortino **1.30** · Calmar 5.21 · ann. return +15.0% ·
 ann. vol 18.3% · max drawdown -2.88% · beta vs SPY 0.79 (corr 0.64) ·
