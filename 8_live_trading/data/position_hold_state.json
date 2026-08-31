@@ -1,10 +1,6 @@
 {
-  "GLD": {
-    "bars": 20,
-    "last_inc_date": "2026-07-31"
-  },
-  "QQQ": {
-    "bars": 4,
-    "last_inc_date": "2026-07-31"
+  "AAPL": {
+    "bars": 0,
+    "last_inc_date": "2026-08-28"
   }
 }

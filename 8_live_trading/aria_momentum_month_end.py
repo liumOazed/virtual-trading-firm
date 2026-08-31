@@ -28,6 +28,7 @@ Output:  8_live_trading/month_end/<YYYY-MM>/
   returns_and_capture.png        daily return dist + up/down capture
   positions_pnl.png              open positions + closed round trips
   deployment_pnl_split.png       deployed % + realized/unrealized P&L
+  month_by_month.png             per-calendar-month return: ARIA vs SPY/QQQ
 
 Usage:
   python aria_momentum_month_end.py
@@ -275,7 +276,7 @@ def open_positions(trades: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
                     if stack[0]["shares"] <= 1e-9:
                         stack.pop(0)
         for lot in stack:
-            if lot["shares"] > 1e-6:
+            if lot["shares"] > 1e-3 and (lot["price"] * lot["shares"]) > 1.0:
                 lots.append({"ticker": tkr, "entry": lot["date"].date(),
                              "entry_px": lot["price"], "shares": lot["shares"],
                              "cost": lot["price"] * lot["shares"]})
@@ -296,6 +297,46 @@ def open_positions(trades: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
         pass
     op["cur_pnl_pct"] = op["ticker"].map(cur)
     return op.sort_values("cur_pnl_pct", na_position="last")
+
+
+def month_by_month(hist: pd.DataFrame) -> pd.DataFrame:
+    """Per-calendar-month return for the book vs SPY vs QQQ, since go-live.
+
+    ARIA's monthly return is computed by CHAINING EQUITY (end/start of month),
+    not by compounding daily_pnl_pct: daily_pnl_pct does not reconcile with
+    the logged equity / total_return_pct series here (compounding it over the
+    full sample undershoots the logged since-inception return by >2pp, likely
+    because daily_pnl_pct is scaled to deployed capital rather than total
+    equity) — so equity is the robust choice. Chaining month-end equity as
+    each next month's base makes the monthly returns telescope back to the
+    since-inception return almost exactly (small residual gap vs the logged
+    total_return_pct is just a ~100k-vs-99,899.23 base rounding difference).
+    SPY/QQQ use first/last price WITHIN each month, so June's baseline is the
+    2026-06-16 go-live price, not June 1st — all three series start together.
+    """
+    hist = hist.sort_values("date").reset_index(drop=True)
+    ym = hist["date"].dt.to_period("M")
+    months = sorted(ym.unique())
+    current_month = pd.Timestamp.now().to_period("M")
+
+    rows, prev_equity = [], None
+    for i, mo in enumerate(months):
+        g = hist[ym == mo]
+        base_equity = prev_equity if prev_equity is not None else g["equity"].iloc[0]
+        aria_ret = (g["equity"].iloc[-1] / base_equity - 1) * 100
+        prev_equity = g["equity"].iloc[-1]
+
+        spy_ret = (g["spy_price"].iloc[-1] / g["spy_price"].iloc[0] - 1) * 100
+        qqq_ret = (g["qqq_price"].iloc[-1] / g["qqq_price"].iloc[0] - 1) * 100
+        partial = (i == 0) or (mo == current_month)
+
+        rows.append({
+            "month": mo, "label": mo.strftime("%b %Y"), "days": len(g),
+            "aria": aria_ret, "spy": spy_ret, "qqq": qqq_ret,
+            "vs_spy": aria_ret - spy_ret, "vs_qqq": aria_ret - qqq_ret,
+            "partial": partial,
+        })
+    return pd.DataFrame(rows)
 
 
 def hold_duration_note(trips: pd.DataFrame) -> str:
@@ -329,7 +370,7 @@ def _style(ax, title, ylabel=None):
     ax.grid(alpha=0.25)
 
 
-def make_charts(hist, qm, reg_attr, parity, trips, opos, outdir: Path):
+def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path):
     dates = hist["date"].dt.strftime("%b %d")
 
     # 1 — equity vs benchmarks, regime-shaded background
@@ -440,11 +481,33 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, outdir: Path):
     plt.xticks(rotation=45); plt.tight_layout()
     fig.savefig(outdir / "deployment_pnl_split.png", dpi=150); plt.close(fig)
 
+    # 8 — month-by-month return comparison
+    fig, ax = plt.subplots(figsize=(9.5, 4.6))
+    labels = [r["label"].split()[0][:3] + ("*" if r["partial"] else "")
+              for _, r in mbm.iterrows()]
+    x = np.arange(len(mbm)); w = 0.26
+    bars = [
+        (x - w, mbm["aria"], NAVY, "ARIA"),
+        (x,     mbm["spy"],  BLUE, "SPY"),
+        (x + w, mbm["qqq"],  AMBER, "QQQ"),
+    ]
+    for pos, vals, color, name in bars:
+        b = ax.bar(pos, vals, w, color=color, label=name)
+        ax.bar_label(b, labels=[f"{v:+.1f}%" for v in vals], fontsize=7,
+                     color=GREY, padding=2)
+    ax.axhline(0, color=MGREY, lw=0.8)
+    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.legend(fontsize=8)
+    _style(ax, "Month-by-month return — ARIA vs SPY vs QQQ", "%")
+    fig.text(0.01, 0.01, "* partial month", fontsize=7, color=GREY)
+    plt.tight_layout()
+    fig.savefig(outdir / "month_by_month.png", dpi=150); plt.close(fig)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # REPORT
 # ══════════════════════════════════════════════════════════════════════════════
-def write_report(qm, reg_attr, parity, trips, opos, hold_note, xcheck,
+def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
                  outdir: Path, tag: str):
     L, A = [], None
     A = L.append
@@ -464,6 +527,16 @@ def write_report(qm, reg_attr, parity, trips, opos, hold_note, xcheck,
     A(f"| Return since inception | **{qm['total_ret']:+.2f}%** | "
       f"{qm['spy_since']:+.2f}% | {qm['qqq_since']:+.2f}% |")
     A(f"| Alpha | — | {qm['alpha_spy']:+.2f}pp | {qm['alpha_qqq']:+.2f}pp |\n")
+
+    A("## Month-by-month")
+    A("| Month | Days | ARIA | SPY | QQQ | vs SPY | vs QQQ |")
+    A("|---|---|---|---|---|---|---|")
+    for _, r in mbm.iterrows():
+        label = r["label"] + ("*" if r["partial"] else "")
+        A(f"| {label} | {int(r['days'])} | {r['aria']:+.2f}% | {r['spy']:+.2f}% | "
+          f"{r['qqq']:+.2f}% | {r['vs_spy']:+.2f}pp | {r['vs_qqq']:+.2f}pp |")
+    A("\n_* partial month (from 2026-06-16 go-live; current month is partial "
+      "too, through the latest logged row)._\n")
 
     A("## Risk-adjusted (annualized from daily — small sample!)")
     A(f"- Sharpe **{qm['sharpe']:.2f}** · Sortino **{qm['sortino']:.2f}** · "
@@ -532,7 +605,7 @@ def write_report(qm, reg_attr, parity, trips, opos, hold_note, xcheck,
     A("## Charts")
     for f in ["equity_vs_benchmarks.png", "drawdown.png", "regime_attribution.png",
               "backtest_parity.png", "returns_and_capture.png",
-              "positions_pnl.png", "deployment_pnl_split.png"]:
+              "positions_pnl.png", "deployment_pnl_split.png", "month_by_month.png"]:
         if (outdir / f).exists():
             A(f"![{f}]({f})")
     A("")
@@ -554,11 +627,12 @@ def main():
     parity   = backtest_parity(reg_attr)
     trips    = round_trips(trades)
     opos     = open_positions(trades, hist)
+    mbm      = month_by_month(hist)
     hnote    = hold_duration_note(trips)
     xcheck   = cross_check(hist, eq)
 
-    make_charts(hist, qm, reg_attr, parity, trips, opos, outdir)
-    write_report(qm, reg_attr, parity, trips, opos, hnote, xcheck, outdir, tag)
+    make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir)
+    write_report(qm, reg_attr, parity, trips, opos, mbm, hnote, xcheck, outdir, tag)
 
     # console summary
     print("=" * 68)
@@ -582,11 +656,14 @@ def main():
               f"net ${trips['pnl_usd'].sum():+,.2f})")
     if len(opos):
         print(f"  Open     : {len(opos)} positions, ${opos['cost'].sum():,.0f} at cost")
+    print("  Months   : " + " | ".join(
+        f"{r['label']}{'*' if r['partial'] else ''} ARIA {r['aria']:+.2f}% "
+        f"(SPY {r['spy']:+.2f}%, QQQ {r['qqq']:+.2f}%)" for _, r in mbm.iterrows()))
     if xcheck:
-        print(f"  ⚠ Cross-check: {len(xcheck)} equity mismatches vs live_equity_curve "
+        print(f"  ! Cross-check: {len(xcheck)} equity mismatches vs live_equity_curve "
               f"— see report")
-    print(f"\n  📁 Report + 7 charts → {outdir}")
-    print("  ⚠ Weeks of data = machinery check, not an edge verdict.")
+    print(f"\n  Report + 8 charts -> {outdir}")
+    print("  ! Weeks of data = machinery check, not an edge verdict.")
 
 
 if __name__ == "__main__":

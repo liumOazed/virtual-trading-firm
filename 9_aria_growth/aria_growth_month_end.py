@@ -21,6 +21,7 @@ Output:  9_aria_growth/month_end/<YYYY-MM>/
   daily_returns_dist.png       return distribution + capture analysis
   positions_pnl.png            per-position P&L + weight drift
   exits_postmortem.png         exit grading (if prices fetched)
+  month_by_month.png           per-calendar-month return: book vs SPY/QQQ
 
 Usage:
   python aria_growth_month_end.py
@@ -141,6 +142,51 @@ def position_metrics(pos: pd.DataFrame) -> dict:
     return m
 
 
+def month_by_month(port: pd.DataFrame) -> pd.DataFrame:
+    """Per-calendar-month return for the book vs SPY vs QQQ, since go-live.
+
+    Chains off the authoritative CUMULATIVE columns (equity for the book,
+    spy_since_pct / qqq_since_pct for benchmarks — turned into an implied
+    index 100*(1+since_pct/100)) rather than compounding the daily columns
+    (day_change_pct, spy_day_pct, qqq_day_pct): compounding day_change_pct
+    over the full sample undershoots the logged total_pnl_pct by ~3.6pp here
+    (same drift seen in the ARIA-momentum report), while chaining off the
+    cumulative columns telescopes the monthly bars back to the exact logged
+    since-inception numbers (verified to within 0.1pp on all three series).
+    """
+    port = port.sort_values("date").reset_index(drop=True)
+    ym = port["date"].dt.to_period("M")
+    months = sorted(ym.unique())
+    current_month = pd.Timestamp.now().to_period("M")
+
+    idx_spy = 100 * (1 + port["spy_since_pct"] / 100)
+    idx_qqq = 100 * (1 + port["qqq_since_pct"] / 100)
+
+    rows = []
+    prev_eq = prev_spy = prev_qqq = None
+    for i, mo in enumerate(months):
+        mask = ym == mo
+        g, gi_spy, gi_qqq = port[mask], idx_spy[mask], idx_qqq[mask]
+
+        base_eq  = prev_eq  if prev_eq  is not None else g["equity"].iloc[0]
+        base_spy = prev_spy if prev_spy is not None else gi_spy.iloc[0]
+        base_qqq = prev_qqq if prev_qqq is not None else gi_qqq.iloc[0]
+
+        aria_ret = (g["equity"].iloc[-1] / base_eq - 1) * 100
+        spy_ret  = (gi_spy.iloc[-1] / base_spy - 1) * 100
+        qqq_ret  = (gi_qqq.iloc[-1] / base_qqq - 1) * 100
+        prev_eq, prev_spy, prev_qqq = g["equity"].iloc[-1], gi_spy.iloc[-1], gi_qqq.iloc[-1]
+
+        partial = (i == 0) or (mo == current_month)
+        rows.append({
+            "month": mo, "label": mo.strftime("%b %Y"), "days": len(g),
+            "aria": aria_ret, "spy": spy_ret, "qqq": qqq_ret,
+            "vs_spy": aria_ret - spy_ret, "vs_qqq": aria_ret - qqq_ret,
+            "partial": partial,
+        })
+    return pd.DataFrame(rows)
+
+
 def exit_postmortem(trades: pd.DataFrame, fetch: bool = True):
     """Grade every closed name: exit price vs price now → saved or cost?"""
     closes = trades[trades["side"] == "close"].copy()
@@ -163,7 +209,7 @@ def exit_postmortem(trades: pd.DataFrame, fetch: bool = True):
                 if s in data.columns and data[s].dropna().size:
                     px_now[s] = float(data[s].dropna().iloc[-1])
         except Exception as e:
-            print(f"  ⚠ price fetch failed ({e}) — post-mortem prices skipped")
+            print(f"  ! price fetch failed ({e}) — post-mortem prices skipped")
     for _, ev in closes.iterrows():
         sym = ev["symbol"]
         ent = trades[(trades["symbol"] == sym) & (trades["side"] == "buy") &
@@ -193,7 +239,7 @@ def _style(ax, title, ylabel=None):
     ax.grid(alpha=0.25)
 
 
-def make_charts(port, qm, pm_pos, pm_exits, outdir: Path):
+def make_charts(port, qm, pm_pos, pm_exits, mbm, outdir: Path):
     dates = port["date"].dt.strftime("%b %d")
 
     # 1. Equity vs benchmarks
@@ -248,11 +294,33 @@ def make_charts(port, qm, pm_pos, pm_exits, outdir: Path):
         _style(ax, "Exited names — realized % at exit")
         plt.tight_layout(); fig.savefig(outdir / "exits_postmortem.png", dpi=150); plt.close(fig)
 
+    # 6. Month-by-month return comparison
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    labels = [r["label"].split()[0][:3] + ("*" if r["partial"] else "")
+              for _, r in mbm.iterrows()]
+    x = np.arange(len(mbm)); w = 0.26
+    bars = [
+        (x - w, mbm["aria"], NAVY, "Growth book"),
+        (x,     mbm["spy"],  BLUE, "SPY"),
+        (x + w, mbm["qqq"],  AMBER, "QQQ"),
+    ]
+    for pos_, vals, color, name in bars:
+        b = ax.bar(pos_, vals, w, color=color, label=name)
+        ax.bar_label(b, labels=[f"{v:+.1f}%" for v in vals], fontsize=7,
+                     color=GREY, padding=2)
+    ax.axhline(0, color=MGREY, lw=0.8)
+    ax.set_xticks(x); ax.set_xticklabels(labels)
+    ax.legend(fontsize=8)
+    _style(ax, "Month-by-month return — Growth book vs SPY vs QQQ", "%")
+    fig.text(0.01, 0.01, "* partial month", fontsize=7, color=GREY)
+    plt.tight_layout()
+    fig.savefig(outdir / "month_by_month.png", dpi=150); plt.close(fig)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # REPORT
 # ══════════════════════════════════════════════════════════════════════════════
-def write_report(qm, pm_pos, pm_exits, trades, outdir: Path, month_tag: str):
+def write_report(qm, pm_pos, pm_exits, trades, mbm, outdir: Path, month_tag: str):
     L = []
     A = L.append
     A(f"# ARIA-Growth — Month-End Review {month_tag}\n")
@@ -267,6 +335,16 @@ def write_report(qm, pm_pos, pm_exits, trades, outdir: Path, month_tag: str):
     A(f"|---|---|---|---|")
     A(f"| Return since go-live | **{qm['total_ret']:+.2f}%** | {qm['spy_since']:+.2f}% | {qm['qqq_since']:+.2f}% |")
     A(f"| Alpha | — | {qm['alpha_spy']:+.2f}pp | {qm['alpha_qqq']:+.2f}pp |\n")
+
+    A("## Month-by-month")
+    A("| Month | Days | Book | SPY | QQQ | vs SPY | vs QQQ |")
+    A("|---|---|---|---|---|---|---|")
+    for _, r in mbm.iterrows():
+        label = r["label"] + ("*" if r["partial"] else "")
+        A(f"| {label} | {int(r['days'])} | {r['aria']:+.2f}% | {r['spy']:+.2f}% | "
+          f"{r['qqq']:+.2f}% | {r['vs_spy']:+.2f}pp | {r['vs_qqq']:+.2f}pp |")
+    A("\n_* partial month (first month is partial from go-live; the current "
+      "month is partial too, through the latest logged row)._\n")
 
     A("## Risk-adjusted (annualized from daily)")
     A(f"- Sharpe: **{qm['sharpe']:.2f}**   |   Sortino: **{qm['sortino']:.2f}**   |   Calmar: {qm['calmar']:.2f}")
@@ -303,7 +381,7 @@ def write_report(qm, pm_pos, pm_exits, trades, outdir: Path, month_tag: str):
 
     A("## Charts")
     for f in ["equity_vs_benchmarks.png", "drawdown.png", "daily_returns_dist.png",
-              "positions_pnl.png", "exits_postmortem.png"]:
+              "positions_pnl.png", "exits_postmortem.png", "month_by_month.png"]:
         if (outdir / f).exists():
             A(f"![{f}]({f})")
     A("")
@@ -327,9 +405,10 @@ def main():
     qm = quant_metrics(port)
     pm_pos = position_metrics(pos)
     pm_exits = exit_postmortem(trades, fetch=not args.no_fetch)
+    mbm = month_by_month(port)
 
-    make_charts(port, qm, pm_pos, pm_exits, outdir)
-    write_report(qm, pm_pos, pm_exits, trades, outdir, month_tag)
+    make_charts(port, qm, pm_pos, pm_exits, mbm, outdir)
+    write_report(qm, pm_pos, pm_exits, trades, mbm, outdir, month_tag)
 
     # console summary
     print("=" * 66)
@@ -344,14 +423,17 @@ def main():
         print(f"  Exits    : {len(pm_exits)} "
               f"({(pm_exits['type']=='STOP-LOSS').sum()} stops, "
               f"{(pm_exits['type']=='MANUAL DROP').sum()} manual)")
+    print("  Months   : " + " | ".join(
+        f"{r['label']}{'*' if r['partial'] else ''} Book {r['aria']:+.2f}% "
+        f"(SPY {r['spy']:+.2f}%, QQQ {r['qqq']:+.2f}%)" for _, r in mbm.iterrows()))
     if MANIFEST.exists():
         man = pd.read_csv(MANIFEST)
         last_snap = man["date"].max()
         print(f"  Screens  : {len(man)} archived, latest {last_snap}"
-              + ("  ⚠ >35d old — run the monthly screener+archive!" if
+              + ("  ! >35d old — run the monthly screener+archive!" if
                  (pd.Timestamp.now() - pd.Timestamp(last_snap)).days > 35 else ""))
-    print(f"\n  📁 Report + charts → {outdir}")
-    print("  ⚠ One month = machinery check, not an edge verdict.")
+    print(f"\n  Report + charts -> {outdir}")
+    print("  ! One month = machinery check, not an edge verdict.")
 
 
 if __name__ == "__main__":
