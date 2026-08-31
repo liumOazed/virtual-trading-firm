@@ -551,7 +551,9 @@ exits = min-hold design working), winners avg hold 13.5d. Book carries one
 open position (AAPL, $12,477 at cost, +0.9%).
 
 ![ARIA-Momentum equity vs benchmarks](8_live_trading/month_end/2026-08/equity_vs_benchmarks.png)
+
 ![ARIA-Momentum month-by-month](8_live_trading/month_end/2026-08/month_by_month.png)
+
 ![ARIA-Momentum drawdown](8_live_trading/month_end/2026-08/drawdown.png)
 
 ### ARIA-Growth (57 trading days since go-live 2026-06-09, Zed2 account)
@@ -587,7 +589,9 @@ through the latest logged row, 2026-08-28._
 biggest loss on stop-loss (SMCI -18.59%).
 
 ![ARIA-Growth equity vs benchmarks](9_aria_growth/month_end/2026-08/equity_vs_benchmarks.png)
+
 ![ARIA-Growth month-by-month](9_aria_growth/month_end/2026-08/month_by_month.png)
+
 ![ARIA-Growth drawdown](9_aria_growth/month_end/2026-08/drawdown.png)
 
 **Bottom line:** both books remain ahead of SPY and QQQ since their
