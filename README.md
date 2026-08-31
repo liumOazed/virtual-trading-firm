@@ -9,6 +9,14 @@
 ---
 
 ## ARIA Momentum — Execution Pipeline
+<img width="2720" height="2800" alt="aria_momentum_daily_run_cycle" src="https://github.com/user-attachments/assets/38c0fac2-f020-4b0a-855b-61f6af4802b0" />
+
+### Now the inside of step 3 — where the actual trading decisions get made:
+<img width="2720" height="1696" alt="aria_momentum_signal_decision_engine" src="https://github.com/user-attachments/assets/d8550c8f-aa06-4958-9e21-508b55499e47" />
+
+### Full ML Decision Pipeline:
+<img width="2720" height="3984" alt="aria_full_ml_decision_pipeline" src="https://github.com/user-attachments/assets/018c95ab-8cd0-4ca1-812f-c7942c62ab94" />
+
 
 ## Current State (June 2026)
 
