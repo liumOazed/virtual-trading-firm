@@ -3,7 +3,7 @@
 **Project:** Virtual Trading Firm
 **Repository root:** `D:\__A Google Drive Project\virtual_trading_firm\`
 **Docs location:** `10_docs_v2/`
-**Last updated:** 2026-07-09
+**Last updated:** 2026-08-31
 **Status:** LIVE — paper trading on Alpaca (account reset 2026-06-15, $100k); locked 95.55% / Sharpe 1.442 min-hold engine
 
 ---
@@ -496,63 +496,100 @@ against SPY and QQQ since go-live. See **Live Validation Reports** below.
 
 ---
 
-## Live Validation Reports (as of 2026-07-09)
+## Live Validation Reports (as of 2026-08-31)
 
 Both live paper books are read-only reviewed by monthly report scripts —
 `aria_momentum_month_end.py` (`8_live_trading/month_end/`) and the ARIA-Growth
 equivalent (`9_aria_growth/month_end/`). Numbers below are pulled straight
-from the latest generated reports. **Sample-size caveat applies to both:**
-a few weeks of live data verifies the machinery and shows behavior; it
-cannot prove or disprove an edge validated over years of backtest.
+from the 2026-08-31 generated reports. **Sample-size caveat applies to
+both:** a few weeks/months of live data verifies the machinery and shows
+behavior; it cannot prove or disprove an edge validated over years of
+backtest.
 
-### ARIA-Momentum (35 trading days since 2026-06-16)
+### ARIA-Momentum (55 trading days since 2026-06-16)
 
-| Metric                 | Book       | SPY     | QQQ     |
-| ---------------------- | ---------- | ------- | ------- |
-| Return since inception | **+2.05%** | -1.03%  | -7.53%  |
-| Alpha                  | —          | +3.08pp | +9.58pp |
+| Metric                  | Book       | SPY     | QQQ     |
+| ------------------------ | ---------- | ------- | ------- |
+| Return since inception  | **+4.09%** | +1.92%  | -3.71%  |
+| Alpha                    | —          | +2.17pp | +7.80pp |
 
-Sharpe **1.70** · Sortino **3.95** · Calmar 6.75 · ann. return +8.1% ·
-ann. vol 4.7% · max drawdown **-1.19%** (backtest budget -6.82%) · beta vs
-SPY 0.12 (corr 0.28) · up-capture 20% / down-capture 7% · hit rate 43%
-(12W/16L) · best day +0.95% · worst -0.61% · avg capital deployed 26%. All
-35 days so far have traded in a single regime (Bull-Stable).
+**Risk-adjusted** (annualized from daily — small sample):
+
+| Sharpe   | Sortino  | Calmar   | Ann. return | Ann. vol | Max drawdown                       |
+| -------- | -------- | -------- | ----------- | -------- | ----------------------------------- |
+| **2.11** | **4.74** | **6.75** | +8.1%       | 3.8%     | **-1.19%** (backtest budget -6.82%) |
+
+Beta vs SPY 0.08 (corr 0.24) · up-capture 15% / down-capture 3% · hit rate
+49% (18W/19L) · best day +0.95% · worst -0.61% · avg capital deployed 23%.
+All 55 days so far have traded in a single regime (Bull-Stable).
+
+**Month-by-month:**
+
+| Month     | Days | ARIA   | SPY    | QQQ    | vs SPY  | vs QQQ  |
+| --------- | ---- | ------ | ------ | ------ | ------- | ------- |
+| Jun 2026* | 11   | -0.01% | -1.83% | -2.68% | +1.82pp | +2.66pp |
+| Jul 2026  | 23   | +2.22% | -0.68% | -7.18% | +2.90pp | +9.40pp |
+| Aug 2026* | 21   | +1.95% | +2.99% | +4.13% | -1.04pp | -2.19pp |
+
+_* partial month — June starts mid-month at 2026-06-16 go-live; August runs
+through the latest logged row, 2026-08-29._
 
 **Live vs backtest, same regime:** Bull-Stable live ann. return +8.1% vs
-the locked backtest's +26.2% for that regime, live Sharpe 1.70 vs backtest
-1.33, live max DD -1.19% vs backtest -6.72%. The mechanical small-sample
-inflation flagged in the prior report (4.05 vs the backtest's 1.35 at 17
-days) is compressing as predicted — live Sharpe has come down to 1.70,
-much closer to backtest's regime-level 1.33 — though ann. vol (4.7% vs
-backtest's ~20%+ in Bull-Stable) shows there's still room to converge. 10
-closed round trips this period: 5W/5L, losers avg hold 4.8d (fast loser
-exits = min-hold design working), winners avg hold 8.0d.
+the locked backtest's +26.2% for that regime, live Sharpe **2.11** vs
+backtest 1.33, live max DD -1.19% vs backtest -6.72% — live continues to
+run tighter and more consistent than the backtest expects for this regime.
+14 closed round trips this period: 8W/6L, losers avg hold 5.3d (fast loser
+exits = min-hold design working), winners avg hold 13.5d. Book carries one
+open position (AAPL, $12,477 at cost, +0.9%).
 
-### ARIA-Growth (20 trading days since go-live 2026-06-09, Zed2 account)
+![ARIA-Momentum equity vs benchmarks](8_live_trading/month_end/2026-08/equity_vs_benchmarks.png)
+![ARIA-Momentum month-by-month](8_live_trading/month_end/2026-08/month_by_month.png)
+![ARIA-Momentum drawdown](8_live_trading/month_end/2026-08/drawdown.png)
 
-| Metric               | Book       | SPY     | QQQ     |
-| -------------------- | ---------- | ------- | ------- |
-| Return since go-live | **+1.44%** | +1.11%  | +0.51%  |
-| Alpha                | —          | +0.33pp | +0.93pp |
+### ARIA-Growth (57 trading days since go-live 2026-06-09, Zed2 account)
 
-Sharpe **0.82** · Sortino **1.30** · Calmar 5.21 · ann. return +15.0% ·
-ann. vol 18.3% · max drawdown -2.88% · beta vs SPY 0.79 (corr 0.64) ·
-up-capture 64% / down-capture 56% (winning by losing less) · hit rate 47%
-(9W/10L) · best day +1.79% · worst -2.92%. 16 open positions (9 in profit);
-4 exits this period (1 stop-loss, 3 manual).
+| Metric                 | Book       | SPY     | QQQ     |
+| ----------------------- | ---------- | ------- | ------- |
+| Return since go-live   | **+8.29%** | +4.37%  | +1.21%  |
+| Alpha                   | —          | +3.92pp | +7.08pp |
 
-ARIA-Growth's Sharpe reads far more "normal" than ARIA-Momentum's at a
-similar sample size, and that's informative rather than a coincidence: its
-daily swings are an order of magnitude larger (worst day -2.92% vs
-ARIA-Momentum's -0.61%, ann. vol 18.3% vs 6.5%), so the same √252 scaling
-doesn't blow up the ratio the way it does for ARIA-Momentum's unusually
-smooth first three weeks.
+**Risk-adjusted** (annualized from daily):
 
-**Bottom line:** both books are ahead of SPY and QQQ since their respective
-go-live dates, execution machinery is behaving as designed on both, and
-neither result is old enough to be conclusive — treat the risk-adjusted
-numbers (especially ARIA-Momentum's) as directional, not final, until more
-regimes and a longer sample accumulate.
+| Sharpe   | Sortino  | Calmar   | Ann. return | Ann. vol | Max drawdown |
+| -------- | -------- | -------- | ----------- | -------- | ------------- |
+| **1.18** | **1.97** | **4.65** | +21.9%      | 18.7%    | **-4.71%**    |
+
+Beta vs SPY 0.83 (corr 0.57) · up-capture 80% / down-capture 71% (winning by
+losing less) · hit rate 52% (28W/26L) · best day +2.66% · worst -2.97%.
+
+**Month-by-month:**
+
+| Month     | Days | Book    | SPY    | QQQ    | vs SPY  | vs QQQ  |
+| --------- | ---- | ------- | ------ | ------ | ------- | ------- |
+| Jun 2026* | 16   | +1.48%  | +1.29% | +4.04% | +0.19pp | -2.56pp |
+| Jul 2026  | 21   | -3.24%  | +0.05% | -6.57% | -3.29pp | +3.33pp |
+| Aug 2026* | 20   | +10.35% | +3.00% | +4.13% | +7.35pp | +6.23pp |
+
+_* partial month — June starts at the 2026-06-09 go-live; August runs
+through the latest logged row, 2026-08-28._
+
+17 open positions (15 in profit); best PLTR +44.6%, worst LHX -13.9%
+(danger zone, <10pt to stop: LHX, VST). 9 exits this period (4 stop-loss,
+3 manual) — biggest wins on rotation exits (MELI +40.84%, ALNY +34.70%),
+biggest loss on stop-loss (SMCI -18.59%).
+
+![ARIA-Growth equity vs benchmarks](9_aria_growth/month_end/2026-08/equity_vs_benchmarks.png)
+![ARIA-Growth month-by-month](9_aria_growth/month_end/2026-08/month_by_month.png)
+![ARIA-Growth drawdown](9_aria_growth/month_end/2026-08/drawdown.png)
+
+**Bottom line:** both books remain ahead of SPY and QQQ since their
+respective go-live dates. ARIA-Growth pulled meaningfully further ahead in
+August alone (+10.35%, led by names like PLTR), while ARIA-Momentum's edge
+is smaller in magnitude but far steadier — max drawdown -1.19% vs Growth's
+-4.71%, consistent with its lower-beta, capital-preservation design.
+Neither result is old enough to be conclusive — treat the risk-adjusted
+numbers as directional, not final, until more regimes and a longer sample
+accumulate.
 
 ---
 
