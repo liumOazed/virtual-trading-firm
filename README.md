@@ -6,6 +6,8 @@
 **Last updated:** 2026-08-31
 **Status:** LIVE — paper trading on Alpaca (account reset 2026-06-15, $100k); locked 95.55% / Sharpe 1.442 min-hold engine
 
+**[Jump to Live Validation Reports →](#live-validation-reports-as-of-2026-08-31)** — current live paper trading performance, equity curves, and benchmark comparisons.
+
 ---
 
 ## ARIA Momentum — Execution Pipeline
