@@ -506,32 +506,32 @@ against SPY and QQQ since go-live. See **Live Validation Reports** below.
 
 ---
 
-## Live Validation Reports (as of 2026-08-31)
+## Live Validation Reports (as of 2026-09-30)
 
 Both live paper books are read-only reviewed by monthly report scripts —
 `aria_momentum_month_end.py` (`8_live_trading/month_end/`) and the ARIA-Growth
 equivalent (`9_aria_growth/month_end/`). Numbers below are pulled straight
-from the 2026-08-31 generated reports. **Sample-size caveat applies to
+from the 2026-09 generated reports. **Sample-size caveat applies to
 both:** a few weeks/months of live data verifies the machinery and shows
 behavior; it cannot prove or disprove an edge validated over years of
 backtest.
 
-### ARIA-Momentum (55 trading days since 2026-06-16)
+### ARIA-Momentum (77 trading days since 2026-06-16)
 
 | Metric                  | Book       | SPY     | QQQ     |
 | ------------------------ | ---------- | ------- | ------- |
-| Return since inception  | **+4.09%** | +1.92%  | -3.71%  |
-| Alpha                    | —          | +2.17pp | +7.80pp |
+| Return since inception  | **+5.36%** | +1.24%  | -0.82%  |
+| Alpha                    | —          | +4.12pp | +6.18pp |
 
 **Risk-adjusted** (annualized from daily — small sample):
 
 | Sharpe   | Sortino  | Calmar   | Ann. return | Ann. vol | Max drawdown                       |
 | -------- | -------- | -------- | ----------- | -------- | ----------------------------------- |
-| **2.11** | **4.74** | **6.75** | +8.1%       | 3.8%     | **-1.19%** (backtest budget -6.82%) |
+| **1.75** | **3.74** | **5.20** | +6.2%       | 3.6%     | **-1.19%** (backtest budget -6.82%) |
 
-Beta vs SPY 0.08 (corr 0.24) · up-capture 15% / down-capture 3% · hit rate
-49% (18W/19L) · best day +0.95% · worst -0.61% · avg capital deployed 23%.
-All 55 days so far have traded in a single regime (Bull-Stable).
+Beta vs SPY 0.09 (corr 0.27) · up-capture 14% / down-capture 5% · hit rate
+46% (24W/28L) · best day +0.95% · worst -0.61% · avg capital deployed 24%.
+All 77 days so far have traded in a single regime (Bull-Stable).
 
 **Month-by-month:**
 
@@ -539,40 +539,51 @@ All 55 days so far have traded in a single regime (Bull-Stable).
 | --------- | ---- | ------ | ------ | ------ | ------- | ------- |
 | Jun 2026* | 11   | -0.01% | -1.83% | -2.68% | +1.82pp | +2.66pp |
 | Jul 2026  | 23   | +2.22% | -0.68% | -7.18% | +2.90pp | +9.40pp |
-| Aug 2026* | 21   | +1.95% | +2.99% | +4.13% | -1.04pp | -2.19pp |
+| Aug 2026  | 21   | +1.95% | +2.99% | +4.13% | -1.04pp | -2.19pp |
+| Sep 2026* | 22   | +1.22% | -0.37% | +2.95% | +1.59pp | -1.73pp |
 
-_* partial month — June starts mid-month at 2026-06-16 go-live; August runs
-through the latest logged row, 2026-08-29._
+_* partial month — June starts mid-month at 2026-06-16 go-live; September runs
+through the latest logged row, 2026-09-30._
 
-**Live vs backtest, same regime:** Bull-Stable live ann. return +8.1% vs
-the locked backtest's +26.2% for that regime, live Sharpe **2.11** vs
+**Inflation-adjusted:** indexed to 100 at 2026-06-16, the book is at
+**105.47 nominal / 104.95 real** — cumulative CPI inflation +0.49% (1.7%
+annualized; CPI-U, BLS, seasonally adjusted, through the Aug 2026 print with
+September estimated) leaves a **+4.95% real gain** after about $514 of
+purchasing power lost to inflation.
+
+**Live vs backtest, same regime:** Bull-Stable live ann. return +6.2% vs
+the locked backtest's +26.2% for that regime, live Sharpe **1.75** vs
 backtest 1.33, live max DD -1.19% vs backtest -6.72% — live continues to
 run tighter and more consistent than the backtest expects for this regime.
-14 closed round trips this period: 8W/6L, losers avg hold 5.3d (fast loser
-exits = min-hold design working), winners avg hold 13.5d. Book carries one
-open position (AAPL, $12,477 at cost, +0.9%).
+19 closed round trips since go-live: 13W/6L (all 5 closed in September were
+winners), losers avg hold 5.3d (fast loser exits = min-hold design working),
+winners avg hold 11.6d. Book carries three open positions (AMZN, GLD, QQQ —
+$37,762 at cost).
 
-![ARIA-Momentum equity vs benchmarks](8_live_trading/month_end/2026-08/equity_vs_benchmarks.png?v=20260831)
+![ARIA-Momentum equity vs benchmarks](8_live_trading/month_end/2026-09/equity_vs_benchmarks.png?v=20260930)
 
-![ARIA-Momentum month-by-month](8_live_trading/month_end/2026-08/month_by_month.png?v=20260831)
+![ARIA-Momentum month-by-month](8_live_trading/month_end/2026-09/month_by_month.png?v=20260930)
 
-![ARIA-Momentum drawdown](8_live_trading/month_end/2026-08/drawdown.png?v=20260831)
+![ARIA-Momentum drawdown](8_live_trading/month_end/2026-09/drawdown.png?v=20260930)
 
-### ARIA-Growth (57 trading days since go-live 2026-06-09, Zed2 account)
+![ARIA-Momentum nominal vs inflation-adjusted value](8_live_trading/month_end/2026-09/inflation_real_value.png?v=20260930)
+
+### ARIA-Growth (79 trading days since go-live 2026-06-09, Zed2 account)
 
 | Metric                 | Book       | SPY     | QQQ     |
 | ----------------------- | ---------- | ------- | ------- |
-| Return since go-live   | **+8.29%** | +4.37%  | +1.21%  |
-| Alpha                   | —          | +3.92pp | +7.08pp |
+| Return since go-live   | **+1.96%** | +3.44%  | +4.51%  |
+| Alpha                   | —          | -1.48pp | -2.55pp |
 
 **Risk-adjusted** (annualized from daily):
 
-| Sharpe   | Sortino  | Calmar   | Ann. return | Ann. vol | Max drawdown |
-| -------- | -------- | -------- | ----------- | -------- | ------------- |
-| **1.18** | **1.97** | **4.65** | +21.9%      | 18.7%    | **-4.71%**    |
+| Sharpe    | Sortino   | Calmar    | Ann. return | Ann. vol | Max drawdown |
+| --------- | --------- | --------- | ----------- | -------- | ------------- |
+| **-0.17** | **-0.28** | **-0.44** | -2.9%       | 17.0%    | **-6.47%**    |
 
-Beta vs SPY 0.83 (corr 0.57) · up-capture 80% / down-capture 71% (winning by
-losing less) · hit rate 52% (28W/26L) · best day +2.66% · worst -2.97%.
+Beta vs SPY 0.83 (corr 0.60) · up-capture 74% / down-capture 89% (now losing
+more on down days than it captures on up days) · hit rate 47% (36W/40L) ·
+best day +2.66% · worst -2.97%.
 
 **Month-by-month:**
 
@@ -580,27 +591,30 @@ losing less) · hit rate 52% (28W/26L) · best day +2.66% · worst -2.97%.
 | --------- | ---- | ------- | ------ | ------ | ------- | ------- |
 | Jun 2026* | 16   | +1.48%  | +1.29% | +4.04% | +0.19pp | -2.56pp |
 | Jul 2026  | 21   | -3.24%  | +0.05% | -6.57% | -3.29pp | +3.33pp |
-| Aug 2026* | 20   | +10.35% | +3.00% | +4.13% | +7.35pp | +6.23pp |
+| Aug 2026  | 21   | +10.15% | +2.69% | +4.18% | +7.46pp | +5.97pp |
+| Sep 2026  | 21   | -5.68%  | -0.60% | +3.21% | -5.08pp | -8.89pp |
 
-_* partial month — June starts at the 2026-06-09 go-live; August runs
-through the latest logged row, 2026-08-28._
+_* partial month — June starts at the 2026-06-09 go-live. August is now a
+full month (revised from the partial +10.35% shown in the Aug 31 report)._
 
-17 open positions (15 in profit); best PLTR +44.6%, worst LHX -13.9%
-(danger zone, <10pt to stop: LHX, VST). 9 exits this period (4 stop-loss,
-3 manual) — biggest wins on rotation exits (MELI +40.84%, ALNY +34.70%),
-biggest loss on stop-loss (SMCI -18.59%).
+16 open positions (10 in profit as of 2026-09-30); best PLTR +40.6%, worst
+EQT -9.1% (danger zone, <10pt to stop: EQT, EXE, VST, CVNA, BG). 10 exits
+since go-live (5 stop-loss, 3 manual, 2 rotation) — biggest wins on rotation
+exits (MELI +40.84%, ALNY +34.70%), biggest loss on stop-loss (SMCI -18.59%);
+September's only exit was LHX, stopped out at +7.81%.
 
-![ARIA-Growth equity vs benchmarks](9_aria_growth/month_end/2026-08/equity_vs_benchmarks.png?v=20260831)
+![ARIA-Growth equity vs benchmarks](9_aria_growth/month_end/2026-09/equity_vs_benchmarks.png?v=20260930)
 
-![ARIA-Growth month-by-month](9_aria_growth/month_end/2026-08/month_by_month.png?v=20260831)
+![ARIA-Growth month-by-month](9_aria_growth/month_end/2026-09/month_by_month.png?v=20260930)
 
-![ARIA-Growth drawdown](9_aria_growth/month_end/2026-08/drawdown.png?v=20260831)
+![ARIA-Growth drawdown](9_aria_growth/month_end/2026-09/drawdown.png?v=20260930)
 
-**Bottom line:** both books remain ahead of SPY and QQQ since their
-respective go-live dates. ARIA-Growth pulled meaningfully further ahead in
-August alone (+10.35%, led by names like PLTR), while ARIA-Momentum's edge
-is smaller in magnitude but far steadier — max drawdown -1.19% vs Growth's
--4.71%, consistent with its lower-beta, capital-preservation design.
+**Bottom line:** the two books have diverged. ARIA-Momentum remains ahead of
+SPY and QQQ since go-live (+5.36%, +4.95% after inflation) and added another
+positive month in September with its max drawdown still -1.19% — consistent
+with its lower-beta, capital-preservation design. ARIA-Growth gave back most
+of August's +10.15% with a -5.68% September, deepening its max drawdown to
+-6.47%, and now trails both SPY (-1.48pp) and QQQ (-2.55pp) since go-live.
 Neither result is old enough to be conclusive — treat the risk-adjusted
 numbers as directional, not final, until more regimes and a longer sample
 accumulate.
