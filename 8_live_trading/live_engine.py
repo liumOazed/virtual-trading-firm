@@ -757,10 +757,14 @@ class LiveEngine:
             from sector_signal_engine import REGIME_TO_SECTORS, TICKER_TO_SECTOR
 
             # ── STEP 3: Global engine — baseline proba for all tickers ─
+            # get_state downloads with yfinance, whose `end` is EXCLUSIVE, so
+            # pass the day AFTER the last closed bar or that bar is dropped.
+            # (Using the NY date itself after the close would stop a day short.)
+            signal_end = (pd.Timestamp(last_bar_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
             bar_probas: Dict[str, float] = {}
             for ticker in TICKERS:
                 try:
-                    g = self._global_engine.get_state(ticker, today_str)
+                    g = self._global_engine.get_state(ticker, signal_end)
                     if g.get("status") == "success":
                         bar_probas[ticker] = (g.get("state_vector", {})
                                                .get("proba_buy", 0.0))
