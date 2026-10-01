@@ -35,6 +35,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "8_live_trading"))
 sys.path.insert(0, os.path.join(ROOT, "7_explainer"))
+from market_clock import ny_today   # New York trading date, never local
 
 LIVE_DIR   = os.path.join(ROOT, "8_live_trading", "data")
 TRADE_LOG  = os.path.join(LIVE_DIR, "live_trade_log.csv")
@@ -125,7 +126,7 @@ def cmd_reset():
 def cmd_run(dry_run: bool = False, explain: bool = False):
     from live_engine import LiveEngine
 
-    header(f"VIRTUAL TRADING FIRM — {'DRY RUN' if dry_run else 'LIVE'} | {date.today()}")
+    header(f"VIRTUAL TRADING FIRM — {'DRY RUN' if dry_run else 'LIVE'} | {ny_today()}")
     t0 = time.time()
 
     # Guard: skip on weekends / market holidays
@@ -160,7 +161,7 @@ def cmd_run(dry_run: bool = False, explain: bool = False):
                 equity_file = EQUITY_LOG,
             )
             explainer = GroqExplainer()
-            today_str = date.today().strftime("%Y-%m-%d")
+            today_str = ny_today().strftime("%Y-%m-%d")
             text = explainer.daily_briefing(today_str, loader, verbose=True)
             explainer.save_report(text, f"live_daily_{today_str}.txt")
             ok(f"Groq briefing complete | {explainer.usage['total_tokens_session']} tokens")

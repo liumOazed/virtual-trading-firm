@@ -2,20 +2,23 @@
 ARIA-Momentum — Month-End Quant Review  (READ-ONLY)
 ====================================================
 Institutional-style periodic review of the live ARIA momentum book.
-Reflects everything from inception (2026-06-15) up to the moment you run it.
+Reflects everything from inception (2026-06-15) through the end of the
+selected month (default: the latest month with a closed trading day).
 
 PRIMARY SOURCE   8_live_trading/data/daily_history.csv
-  (equity, cash, deployed_pct, n_positions, daily/total P&L, realized/
-   unrealized split, regime, SPY/QQQ prices + since-inception returns +
-   alpha — all logged daily by daily_recorder.py)
-SECONDARY        8_live_trading/data/live_trade_log.csv   (trade events)
+  One row per CLOSED trading day, rebuilt from Alpaca's own records by
+  alpaca_ledger.py (engine run / daily_recorder.py): equity = Alpaca official
+  end-of-day equity, cash/realized/fees from Alpaca activities, SPY/QQQ at
+  official closes, since-inception returns from the inception-day open.
+SECONDARY        8_live_trading/data/live_trade_log.csv   (Alpaca fills)
 CROSS-CHECK      8_live_trading/data/live_equity_curve.csv
 
 INFLATION        official CPI-U (BLS, SA) from FRED CPIAUCSL — the ONE network
                  call; cached to data/cpi_cpiaucsl.csv and used offline.
 
-No Alpaca calls, no yfinance — everything else is computed from the logged
-CSVs. READ-ONLY: never places orders, never modifies trading data.
+No Alpaca calls, no yfinance — everything else is computed from the synced
+CSVs (run daily_recorder.py --sync first if the engine hasn't run since the
+month closed). READ-ONLY: never places orders, never modifies trading data.
 
 Signature sections (what makes this ARIA-momentum's report):
   1. REGIME ATTRIBUTION  — performance grouped by HMM regime
@@ -36,7 +39,8 @@ Output:  8_live_trading/month_end/<YYYY-MM>/
   inflation_real_value.csv       per-day series behind that chart
 
 Usage:
-  python aria_momentum_month_end.py
+  python aria_momentum_month_end.py                  # latest month
+  python aria_momentum_month_end.py --month 2026-09  # a specific month
 
 Honest note baked into the report: a few weeks of live data verifies the
 MACHINERY and observes behavior. It cannot prove or disprove the edge that
@@ -45,6 +49,8 @@ indicative, not conclusive — especially while the book has traded in only
 one regime.
 """
 
+import argparse
+import sys
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +65,8 @@ warnings.filterwarnings("ignore")
 
 # ── paths ─────────────────────────────────────────────────────────────────────
 _HERE      = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+from market_clock import ny_today   # New York date, never local
 DATA_DIR   = _HERE / "data" if (_HERE / "data").exists() else _HERE
 HIST_FILE  = DATA_DIR / "daily_history.csv"
 TRADE_FILE = DATA_DIR / "live_trade_log.csv"
@@ -100,7 +108,7 @@ BACKTEST = {
 # ══════════════════════════════════════════════════════════════════════════════
 def load():
     hist = pd.read_csv(HIST_FILE, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
-    trades = pd.read_csv(TRADE_FILE, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
+    trades = pd.read_csv(TRADE_FILE, parse_dates=["date"]).sort_values("date", kind="stable").reset_index(drop=True)
     eq = None
     if EQ_FILE.exists():
         eq = pd.read_csv(EQ_FILE, parse_dates=["date"]).sort_values("date").reset_index(drop=True)
@@ -173,9 +181,11 @@ def quant_metrics(hist: pd.DataFrame) -> dict:
     m["best_day"], m["worst_day"] = np.nanmax(r) * 100, np.nanmin(r) * 100
 
     # indexed curves for the chart
-    m["idx_book"] = 100 * (1 + pd.Series(r).fillna(0)).cumprod().values
-    m["idx_spy"]  = 100 * (1 + pd.Series(spy_r).fillna(0)).cumprod().values
-    m["idx_qqq"]  = 100 * (1 + pd.Series(qqq_r).fillna(0)).cumprod().values
+    # from the since-inception columns, so all three share the headline's
+    # base (the $100k at the inception-day open) and end on the table values
+    m["idx_book"] = 100 + hist["total_return_pct"].values
+    m["idx_spy"]  = 100 + hist["spy_ret_since_incept"].values
+    m["idx_qqq"]  = 100 + hist["qqq_ret_since_incept"].values
 
     # deployment + P&L split (straight from the file)
     m["deployed"]   = hist["deployed_pct"].values
@@ -233,7 +243,7 @@ def round_trips(trades: pd.DataFrame) -> pd.DataFrame:
     """Match BUYs to SELLs per ticker (FIFO). Returns one row per closed trip."""
     trips = []
     for tkr, g in trades.groupby("ticker"):
-        g = g.sort_values("date")
+        g = g.sort_values("date", kind="stable")
         open_lots = []  # [ {date, price, shares, regime} ]
         for _, t in g.iterrows():
             if str(t["action"]).upper() == "BUY":
@@ -272,7 +282,7 @@ def open_positions(trades: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
     column for current P&L% if available."""
     lots = []
     for tkr, g in trades.groupby("ticker"):
-        g = g.sort_values("date")
+        g = g.sort_values("date", kind="stable")
         stack = []
         for _, t in g.iterrows():
             if str(t["action"]).upper() == "BUY":
@@ -300,7 +310,7 @@ def open_positions(trades: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
     cur = {}
     try:
         latest_str = str(hist["positions"].iloc[-1])
-        for token in latest_str.replace(";", ",").split(","):
+        for token in latest_str.replace(";", " ").replace(",", " ").split():
             if ":" in token:
                 k, v = token.split(":", 1)
                 cur[k.strip().upper()] = float(v.strip().rstrip("%").replace("+", ""))
@@ -313,32 +323,28 @@ def open_positions(trades: pd.DataFrame, hist: pd.DataFrame) -> pd.DataFrame:
 def month_by_month(hist: pd.DataFrame) -> pd.DataFrame:
     """Per-calendar-month return for the book vs SPY vs QQQ, since go-live.
 
-    ARIA's monthly return is computed by CHAINING EQUITY (end/start of month),
-    not by compounding daily_pnl_pct: daily_pnl_pct does not reconcile with
-    the logged equity / total_return_pct series here (compounding it over the
-    full sample undershoots the logged since-inception return by >2pp, likely
-    because daily_pnl_pct is scaled to deployed capital rather than total
-    equity) — so equity is the robust choice. Chaining month-end equity as
-    each next month's base makes the monthly returns telescope back to the
-    since-inception return almost exactly (small residual gap vs the logged
-    total_return_pct is just a ~100k-vs-99,899.23 base rounding difference).
-    SPY/QQQ use first/last price WITHIN each month, so June's baseline is the
-    2026-06-16 go-live price, not June 1st — all three series start together.
+    Chained from the SINCE-INCEPTION columns written by alpaca_ledger:
+        month_ret = (1 + cum_at_month_end) / (1 + cum_at_prev_month_end) − 1
+    Book and benchmarks therefore share one base (the $100k at the inception
+    open), each month starts exactly where the previous one ended, and the
+    months telescope back to the since-inception return exactly.
+    A month is partial if it is the first (mid-month go-live) or is still
+    running in New York.
     """
     hist = hist.sort_values("date").reset_index(drop=True)
     ym = hist["date"].dt.to_period("M")
     months = sorted(ym.unique())
-    current_month = pd.Timestamp.now().to_period("M")
+    current_month = pd.Period(ny_today(), "M")
+    cols = {"aria": "total_return_pct", "spy": "spy_ret_since_incept",
+            "qqq": "qqq_ret_since_incept"}
 
-    rows, prev_equity = [], None
+    rows, prev = [], {k: 0.0 for k in cols}
     for i, mo in enumerate(months):
         g = hist[ym == mo]
-        base_equity = prev_equity if prev_equity is not None else g["equity"].iloc[0]
-        aria_ret = (g["equity"].iloc[-1] / base_equity - 1) * 100
-        prev_equity = g["equity"].iloc[-1]
-
-        spy_ret = (g["spy_price"].iloc[-1] / g["spy_price"].iloc[0] - 1) * 100
-        qqq_ret = (g["qqq_price"].iloc[-1] / g["qqq_price"].iloc[0] - 1) * 100
+        end = {k: g[c].iloc[-1] for k, c in cols.items()}
+        ret = {k: ((1 + end[k] / 100) / (1 + prev[k] / 100) - 1) * 100 for k in cols}
+        prev = end
+        aria_ret, spy_ret, qqq_ret = ret["aria"], ret["spy"], ret["qqq"]
         partial = (i == 0) or (mo == current_month)
 
         rows.append({
@@ -720,8 +726,9 @@ def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
         label = r["label"] + ("*" if r["partial"] else "")
         A(f"| {label} | {int(r['days'])} | {r['aria']:+.2f}% | {r['spy']:+.2f}% | "
           f"{r['qqq']:+.2f}% | {r['vs_spy']:+.2f}pp | {r['vs_qqq']:+.2f}pp |")
-    A("\n_* partial month (from 2026-06-16 go-live; current month is partial "
-      "too, through the latest logged row)._\n")
+    A(f"\n_* partial month (first month starts at the {qm['start']:%Y-%m-%d} "
+      "go-live; a month still running in New York is partial through its "
+      "latest closed trading day)._\n")
 
     if infl is not None:
         d = infl["df"]
@@ -829,8 +836,20 @@ def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--month", help="YYYY-MM to review (default: latest month in the data)")
+    args = ap.parse_args()
+
     hist, trades, eq = load()
-    tag = hist["date"].max().strftime("%Y-%m")
+    month = pd.Period(args.month, "M") if args.month else hist["date"].max().to_period("M")
+    cutoff = month.end_time.normalize()
+    hist   = hist[hist["date"] <= cutoff].reset_index(drop=True)
+    trades = trades[trades["date"] <= cutoff].reset_index(drop=True)
+    if eq is not None:
+        eq = eq[eq["date"] <= cutoff].reset_index(drop=True)
+    if hist.empty:
+        raise SystemExit(f"No closed trading days on or before {month}.")
+    tag = str(month)
     outdir = _HERE / "month_end" / tag
     outdir.mkdir(parents=True, exist_ok=True)
 

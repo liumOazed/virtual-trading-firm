@@ -16,6 +16,7 @@ Shows:
 import os
 import pandas as pd
 from datetime import date
+from market_clock import ny_today   # New York trading date, never local
 
 LIVE_DIR   = os.path.join(os.path.dirname(__file__), "data")
 TRADE_LOG  = os.path.join(LIVE_DIR, "live_trade_log.csv")
@@ -116,7 +117,7 @@ def render_status_report(client, regime: str = None):
     print(_c("╔" + "═"*W + "╗", C.CYN))
     title = "  ARIA · LIVE RECONCILIATION REPORT"
     print(_c("║", C.CYN) + _c(title.ljust(W), C.B+C.CYN) + _c("║", C.CYN))
-    sub = f"  {date.today().strftime('%A, %B %d, %Y')}   ·   {'◉ MARKET OPEN' if hours['is_open'] else '○ MARKET CLOSED'}"
+    sub = f"  {ny_today().strftime('%A, %B %d, %Y')}   ·   {'◉ MARKET OPEN' if hours['is_open'] else '○ MARKET CLOSED'}"
     print(_c("║", C.CYN) + _c(sub.ljust(W), C.DIM) + _c("║", C.CYN))
     print(_c("╚" + "═"*W + "╝", C.CYN))
 

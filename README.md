@@ -518,49 +518,60 @@ both:** a few weeks/months of live data verifies the machinery and shows
 behavior; it cannot prove or disprove an edge validated over years of
 backtest.
 
-### ARIA-Momentum (77 trading days since 2026-06-16)
+### ARIA-Momentum (75 trading days since go-live 2026-06-15)
+
+_Data note: every ARIA-Momentum number below is rebuilt from Alpaca's own
+records (fills, fees and official end-of-day equity) by
+`8_live_trading/alpaca_ledger.py`, which reconciles to Alpaca within $0.05 on
+every posted day. This replaces the earlier self-logged history, whose rows
+were a mix of opening snapshots and afternoon snapshots stamped with the next
+day's date. Figures therefore differ from previously published versions,
+including July and August. Two days use the ledger's reconstruction instead
+of Alpaca's daily figure: 2026-07-29, where Alpaca's record repeats the prior
+day, and 2026-09-30, not yet posted by Alpaca at report time. Benchmarks are
+measured from the 2026-06-15 open, when capital went live._
 
 | Metric                  | Book       | SPY     | QQQ     |
 | ------------------------ | ---------- | ------- | ------- |
-| Return since inception  | **+5.36%** | +1.24%  | -0.82%  |
-| Alpha                    | —          | +4.12pp | +6.18pp |
+| Return since inception  | **+5.46%** | +1.43%  | +0.23%  |
+| Alpha                    | —          | +4.03pp | +5.23pp |
 
-**Risk-adjusted** (annualized from daily — small sample):
+**Risk-adjusted** (annualized from daily close-to-close returns — small sample):
 
-| Sharpe   | Sortino  | Calmar   | Ann. return | Ann. vol | Max drawdown                       |
-| -------- | -------- | -------- | ----------- | -------- | ----------------------------------- |
-| **1.75** | **3.74** | **5.20** | +6.2%       | 3.6%     | **-1.19%** (backtest budget -6.82%) |
+| Sharpe   | Sortino  | Calmar    | Ann. return | Ann. vol | Max drawdown                       |
+| -------- | -------- | --------- | ----------- | -------- | ----------------------------------- |
+| **3.90** | **9.34** | **15.04** | +18.0%      | 4.6%     | **-1.20%** (backtest budget -6.82%) |
 
-Beta vs SPY 0.09 (corr 0.27) · up-capture 14% / down-capture 5% · hit rate
-46% (24W/28L) · best day +0.95% · worst -0.61% · avg capital deployed 24%.
-All 77 days so far have traded in a single regime (Bull-Stable).
+Beta vs SPY 0.15 (corr 0.38) · up-capture 23% / down-capture -1% · hit rate
+55% (41W/34L) · best day +0.81% · worst -0.54% · avg capital deployed 24%.
+All 75 days so far have traded in a single regime (Bull-Stable).
 
 **Month-by-month:**
 
 | Month     | Days | ARIA   | SPY    | QQQ    | vs SPY  | vs QQQ  |
 | --------- | ---- | ------ | ------ | ------ | ------- | ------- |
-| Jun 2026* | 11   | -0.01% | -1.83% | -2.68% | +1.82pp | +2.66pp |
-| Jul 2026  | 23   | +2.22% | -0.68% | -7.18% | +2.90pp | +9.40pp |
-| Aug 2026  | 21   | +1.95% | +2.99% | +4.13% | -1.04pp | -2.19pp |
-| Sep 2026* | 22   | +1.22% | -0.37% | +2.95% | +1.59pp | -1.73pp |
+| Jun 2026* | 11   | +0.32% | -0.68% | -0.23% | +1.00pp | +0.56pp |
+| Jul 2026  | 22   | +1.74% | +0.03% | -6.57% | +1.70pp | +8.31pp |
+| Aug 2026  | 21   | +1.87% | +2.68% | +4.18% | -0.81pp | -2.32pp |
+| Sep 2026  | 21   | +1.43% | -0.58% | +3.21% | +2.01pp | -1.78pp |
 
-_* partial month — June starts mid-month at 2026-06-16 go-live; September runs
-through the latest logged row, 2026-09-30._
+_* partial month — June starts at the 2026-06-15 go-live. The four months
+compound exactly to the since-inception return._
 
-**Inflation-adjusted:** indexed to 100 at 2026-06-16, the book is at
-**105.47 nominal / 104.95 real** — cumulative CPI inflation +0.49% (1.7%
+**Inflation-adjusted:** indexed to 100 at the 2026-06-16 close, the book is at
+**105.57 nominal / 105.05 real** — cumulative CPI inflation +0.49% (1.7%
 annualized; CPI-U, BLS, seasonally adjusted, through the Aug 2026 print with
-September estimated) leaves a **+4.95% real gain** after about $514 of
+September estimated) leaves a **+5.05% real gain** after about $515 of
 purchasing power lost to inflation.
 
-**Live vs backtest, same regime:** Bull-Stable live ann. return +6.2% vs
-the locked backtest's +26.2% for that regime, live Sharpe **1.75** vs
-backtest 1.33, live max DD -1.19% vs backtest -6.72% — live continues to
+**Live vs backtest, same regime:** Bull-Stable live ann. return +18.0% vs
+the locked backtest's +26.2% for that regime, live Sharpe **3.90** vs
+backtest 1.33, live max DD -1.20% vs backtest -6.72% — live continues to
 run tighter and more consistent than the backtest expects for this regime.
 19 closed round trips since go-live: 13W/6L (all 5 closed in September were
-winners), losers avg hold 5.3d (fast loser exits = min-hold design working),
-winners avg hold 11.6d. Book carries three open positions (AMZN, GLD, QQQ —
-$37,762 at cost).
+winners), losers avg hold 5.5d (fast loser exits = min-hold design working),
+winners avg hold 11.8d. Book carries three open positions — AMZN +0.9%,
+QQQ +0.1%, GLD -6.3% ($37,762 at cost).
 
 ![ARIA-Momentum equity vs benchmarks](8_live_trading/month_end/2026-09/equity_vs_benchmarks.png?v=20260930)
 
@@ -612,8 +623,8 @@ September's only exit was LHX, stopped out at +7.81%.
 ![ARIA-Growth drawdown](9_aria_growth/month_end/2026-09/drawdown.png?v=20260930)
 
 **Bottom line:** the two books have diverged. ARIA-Momentum remains ahead of
-SPY and QQQ since go-live (+5.36%, +4.95% after inflation) and added another
-positive month in September with its max drawdown still -1.19% — consistent
+SPY and QQQ since go-live (+5.46%, +5.05% after inflation) and added another
+positive month in September with its max drawdown still -1.20% — consistent
 with its lower-beta, capital-preservation design. ARIA-Growth gave back most
 of August's +10.15% with a -5.68% September, deepening its max drawdown to
 -6.47%, and now trails both SPY (-1.48pp) and QQQ (-2.55pp) since go-live.

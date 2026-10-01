@@ -21,6 +21,7 @@ import os
 import time
 import requests
 from datetime import datetime, date, timedelta
+from market_clock import ny_today   # New York trading date, never local
 from typing import Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 
@@ -310,8 +311,8 @@ class AlpacaClient:
         Returns list of dicts: date, open, high, low, close, volume.
         Sorted oldest → newest.
         """
-        start = (date.today() - timedelta(days=days + 10)).isoformat()
-        end   = date.today().isoformat()
+        start = (ny_today() - timedelta(days=days + 10)).isoformat()
+        end   = ny_today().isoformat()
         bars  = []
         url   = f"{DATA_URL}/v2/stocks/{ticker}/bars"
         params = {
@@ -358,8 +359,8 @@ class AlpacaClient:
         Fetch bars for multiple tickers in one call (efficient).
         Returns {ticker: [bar_dicts]}.
         """
-        start  = (date.today() - timedelta(days=days + 10)).isoformat()
-        end    = date.today().isoformat()
+        start  = (ny_today() - timedelta(days=days + 10)).isoformat()
+        end    = ny_today().isoformat()
         result = {tk: [] for tk in tickers}
         params = {
             "symbols":   ",".join(tickers),
@@ -442,13 +443,13 @@ class AlpacaClient:
     def is_trading_day(self) -> bool:
         """Returns True if today is a trading day (not weekend/holiday)."""
         try:
-            today = date.today().isoformat()
+            today = ny_today().isoformat()
             data  = self._get(TRADE_URL, "/v2/calendar",
                               params={"start": today, "end": today})
             return len(data) > 0
         except Exception:
             # Fallback: check if weekday
-            return date.today().weekday() < 5
+            return ny_today().weekday() < 5
 
     # ── portfolio state (mirrors what engine needs) ───────────────────────
 

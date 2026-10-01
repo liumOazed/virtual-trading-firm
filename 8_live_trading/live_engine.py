@@ -31,6 +31,7 @@ import pickle
 import shutil
 import traceback
 from datetime import datetime, date
+from market_clock import ny_today, trading_date   # New York date, never local
 from typing import Dict, List, Optional
 
 import time
@@ -129,7 +130,7 @@ class SignalInterceptor:
         regime     = state["hmm_regime"]
 
         self.signals.append({
-            "date":        str(state.get("current_date", date.today())),
+            "date":        str(state.get("current_date", ny_today())),
             "ticker":      ticker,
             "action":      "BUY_SIGNAL",
             "confidence":  round(confidence, 4),
@@ -306,7 +307,7 @@ class PositionReconciler:
                     # (entry-bar parity with backtest _bars_held logic)
                     _hs = _load_hold_state()
                     if ticker not in _hs:
-                        _hs[ticker] = {"bars": 0, "last_inc_date": date.today().isoformat()}
+                        _hs[ticker] = {"bars": 0, "last_inc_date": ny_today().isoformat()}
                         _save_hold_state(_hs)
             else:
                 print(f"    [DRY RUN] would buy {ticker} for ${notional:,.0f}")
@@ -395,6 +396,7 @@ class LiveTradeLogger:
         "date", "ticker", "action", "price", "shares",
         "proba", "weight", "hmm_regime", "reason",
         "portfolio_value", "order_id", "notional", "price_estimated",
+        "filled_at",   # NY fill time — filled in by alpaca_ledger.sync()
     ]
 
     def __init__(self, log_path: str = LIVE_TRADE_LOG):
@@ -441,6 +443,7 @@ class LiveTradeLogger:
             "order_id":        order_id,
             "notional":        round(float(notional or 0), 2),
             "price_estimated": price_estimated,
+            "filled_at":       "",
         }])
         row.to_csv(self.path, mode="a", header=False, index=False)
 
@@ -463,7 +466,7 @@ class LiveTradeLogger:
             print(f"    ⚠ {order['ticker']} price ESTIMATED "
                   f"(${_fill_price:.2f}) — fill not confirmed; flagged in log")
         self.log(
-            date_str        = signal.get("date", str(date.today())),
+            date_str        = signal.get("date", str(ny_today())),
             ticker          = order["ticker"],
             action          = order["side"].upper(),
             price           = _fill_price,
@@ -487,7 +490,8 @@ class LiveTradeLogger:
 
 def log_equity(equity: float, regime: str = "Unknown"):
     """Write today's equity to the live equity curve (upsert — one row per date)."""
-    today = date.today().strftime("%Y-%m-%d")
+
+    today = trading_date()
     row   = pd.DataFrame([{
         "date":   today,
         "equity": round(equity, 2),
@@ -539,7 +543,7 @@ class LiveEngine:
 
     def run(self) -> Dict:
         """Execute one daily live trading cycle."""
-        today = date.today().strftime("%Y-%m-%d")
+        today = ny_today().strftime("%Y-%m-%d")
         print(f"\n{'═'*60}")
         print(f"  LIVE ENGINE — {today}")
         print(f"  Mode: {'DRY RUN (no real orders)' if self.dry_run else 'PAPER TRADING'}")
@@ -669,7 +673,7 @@ class LiveEngine:
         → regime gate → sector-native threshold → buy/sell decision.
         """
         signals     = []
-        today_str   = date.today().strftime("%Y-%m-%d")
+        today_str   = ny_today().strftime("%Y-%m-%d")
         _hold_state = _load_hold_state()   # safe default; overwritten inside try
 
         try:
@@ -693,7 +697,7 @@ class LiveEngine:
             positions_map  = {p["ticker"]: p for p in _all_positions}
 
             # ── bars-held counter (idempotent per calendar day) ────────────
-            _today_iso  = date.today().isoformat()
+            _today_iso  = ny_today().isoformat()
             _hold_state = _load_hold_state()
             for _t in held:
                 _rec = _hold_state.get(_t, {"bars": -1, "last_inc_date": None})
@@ -967,7 +971,7 @@ class LiveEngine:
                       "tsla_ext_exit"  if ext_exit  else
                       f"tsla_bear|{regime}")
             out.append({
-                "date": date.today().strftime("%Y-%m-%d"),
+                "date": ny_today().strftime("%Y-%m-%d"),
                 "ticker": "TSLA", "action": "SELL",
                 "confidence": 0.0, "hmm_regime": regime,
                 "reason": f"{reason}|rsi={rsi:.1f}|pct={pct:.1f}",
@@ -975,7 +979,7 @@ class LiveEngine:
         elif (not in_pos and regime == "Bull-Trending"
               and 42 <= rsi <= 62 and -10 <= pct <= 60 and rsi_rising):
             out.append({
-                "date": date.today().strftime("%Y-%m-%d"),
+                "date": ny_today().strftime("%Y-%m-%d"),
                 "ticker": "TSLA", "action": "BUY",
                 "confidence": 0.88, "hmm_regime": regime,
                 "pos_value": round(equity * 0.12 * 0.80, 2),
