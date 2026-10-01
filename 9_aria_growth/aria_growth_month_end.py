@@ -35,6 +35,7 @@ one month are indicative, not conclusive.
 """
 
 import argparse
+import json
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -53,6 +54,7 @@ POS_FILE  = _HERE / "daily_positions.csv"
 PORT_FILE = _HERE / "daily_portfolio.csv"
 TRADE_FILE= _HERE / "growth_trade_log.csv"
 MANIFEST  = _HERE / "screens" / "_manifest.csv"
+LOG_STATE = _HERE / "daily_log_state.json"   # go-live equity_base (logger)
 
 GREEN, RED, BLUE, AMBER = "#1D9E75", "#E24B4A", "#378ADD", "#EF9F27"
 NAVY, GREY, MGREY = "#1A3A5C", "#888780", "#D1D5DB"
@@ -76,8 +78,51 @@ def load():
 # ══════════════════════════════════════════════════════════════════════════════
 # QUANT METRICS
 # ══════════════════════════════════════════════════════════════════════════════
+def _equity_base(port: pd.DataFrame) -> float:
+    """Go-live capital recorded by aria_growth_daily_log.py (the base of
+    total_pnl_pct); falls back to backing it out of the first row."""
+    try:
+        return float(json.loads(LOG_STATE.read_text())["equity_base"])
+    except Exception:
+        return float(port["equity"].iloc[0] / (1 + port["total_pnl_pct"].iloc[0] / 100))
+
+
+def period_stats(r, eqv) -> dict:
+    """Risk/return over the ACTUAL trading days only — nothing annualized
+    except ann_ret, which is an explicit extrapolation.
+    (Same definitions as 8_live_trading/aria_momentum_month_end.py.)
+
+      period_ret  compounded return over the n days
+      ann_ret     EXTRAPOLATED: (1 + period_ret)^(252/n) − 1 — a projection
+      period_vol  daily stdev × √n
+      sharpe      mean / stdev × √n            (period Sharpe, rf = 0)
+      sortino     mean / downside dev × √n     downside dev = √mean(min(r,0)²)
+      calmar      period_ret / |max drawdown|  (same window)
+    """
+    r = np.asarray(r, dtype=float); r = r[~np.isnan(r)]
+    n = len(r)
+    out = {"n_obs": n}
+    out["period_ret"] = (np.prod(1 + r) - 1) * 100
+    out["ann_ret"]    = ((1 + out["period_ret"] / 100) ** (TRADING_DAYS / n) - 1) * 100 if n else np.nan
+    mu, sd = (r.mean(), r.std(ddof=1)) if n > 1 else (np.nan, np.nan)
+    dsd = np.sqrt(np.mean(np.minimum(r, 0) ** 2)) if n else np.nan
+    out["period_vol"] = sd * np.sqrt(n) * 100 if sd > 0 else np.nan
+    out["sharpe"]     = mu / sd * np.sqrt(n) if sd > 0 else np.nan
+    out["sortino"]    = mu / dsd * np.sqrt(n) if dsd > 0 else np.nan
+    eqv = np.asarray(eqv, dtype=float)
+    out["max_dd"] = (eqv / np.maximum.accumulate(eqv) - 1).min() * 100 if len(eqv) > 1 else 0.0
+    out["calmar"] = out["period_ret"] / abs(out["max_dd"]) if out["max_dd"] < 0 else np.nan
+    return out
+
+
 def quant_metrics(port: pd.DataFrame) -> dict:
-    r = port["day_change_pct"].values / 100.0          # daily book returns
+    # Daily book returns CHAINED FROM EQUITY (first day vs the go-live base).
+    # Not day_change_pct: the logger measures that against Alpaca's
+    # last_equity, which can be stale (e.g. 2026-07-30 logs -2.16% while
+    # equity rose +0.83%); compounded it misses the logged total by ~3pp.
+    base = _equity_base(port)
+    eqv  = np.r_[base, port["equity"].values]
+    r    = eqv[1:] / eqv[:-1] - 1
     spy = port["spy_day_pct"].values / 100.0
     qqq = port["qqq_day_pct"].values / 100.0
     n = len(r)
@@ -89,20 +134,9 @@ def quant_metrics(port: pd.DataFrame) -> dict:
     m["alpha_spy"]  = m["total_ret"] - m["spy_since"]
     m["alpha_qqq"]  = m["total_ret"] - m["qqq_since"]
 
-    mu, sd = np.nanmean(r), np.nanstd(r, ddof=1)
-    downside = np.nanstd(np.minimum(r, 0), ddof=1)
-    m["ann_ret"]    = mu * TRADING_DAYS * 100
-    m["ann_vol"]    = sd * np.sqrt(TRADING_DAYS) * 100
-    m["sharpe"]     = (mu / sd * np.sqrt(TRADING_DAYS)) if sd > 0 else np.nan
-    m["sortino"]    = (mu / downside * np.sqrt(TRADING_DAYS)) if downside > 0 else np.nan
-
-    # drawdown from the daily equity curve
+    m.update(period_stats(r, eqv))
     eq = port["equity"].values
-    peak = np.maximum.accumulate(eq)
-    dd = eq / peak - 1
-    m["max_dd"] = dd.min() * 100
-    m["dd_series"] = dd * 100
-    m["calmar"] = (m["ann_ret"] / abs(m["max_dd"])) if m["max_dd"] < 0 else np.nan
+    m["dd_series"] = (eq / np.maximum.accumulate(eqv)[1:] - 1) * 100
 
     # benchmark relationship
     mask = ~np.isnan(r) & ~np.isnan(spy)
@@ -121,9 +155,10 @@ def quant_metrics(port: pd.DataFrame) -> dict:
     m["hit_rate"] = m["win_days"] / max(m["win_days"] + m["lose_days"], 1) * 100
 
     # indexed curves
-    m["idx_book"] = 100 * (1 + pd.Series(r).fillna(0)).cumprod().values
-    m["idx_spy"]  = 100 * (1 + pd.Series(spy).fillna(0)).cumprod().values
-    m["idx_qqq"]  = 100 * (1 + pd.Series(qqq).fillna(0)).cumprod().values
+    # from the cumulative columns: one shared go-live base, ends on the table
+    m["idx_book"] = 100 * port["equity"].values / base
+    m["idx_spy"]  = 100 + port["spy_since_pct"].values
+    m["idx_qqq"]  = 100 + port["qqq_since_pct"].values
     m["r"], m["spy_r"], m["qqq_r"] = r, spy, qqq
     return m
 
@@ -157,13 +192,15 @@ def month_by_month(port: pd.DataFrame) -> pd.DataFrame:
     port = port.sort_values("date").reset_index(drop=True)
     ym = port["date"].dt.to_period("M")
     months = sorted(ym.unique())
-    current_month = pd.Timestamp.now().to_period("M")
+    current_month = pd.Timestamp.now(tz="America/New_York").tz_localize(None).to_period("M")
 
     idx_spy = 100 * (1 + port["spy_since_pct"] / 100)
     idx_qqq = 100 * (1 + port["qqq_since_pct"] / 100)
 
     rows = []
-    prev_eq = prev_spy = prev_qqq = None
+    # start from the go-live base (not the first row) so the months compound
+    # exactly to the since-inception return
+    prev_eq, prev_spy, prev_qqq = _equity_base(port), 100.0, 100.0
     for i, mo in enumerate(months):
         mask = ym == mo
         g, gi_spy, gi_qqq = port[mask], idx_spy[mask], idx_qqq[mask]
@@ -346,9 +383,16 @@ def write_report(qm, pm_pos, pm_exits, trades, mbm, outdir: Path, month_tag: str
     A("\n_* partial month (first month is partial from go-live; the current "
       "month is partial too, through the latest logged row)._\n")
 
-    A("## Risk-adjusted (annualized from daily)")
+    A(f"## Risk-adjusted (over the {qm['n_obs']} trading days — not annualized)")
+    A(f"_Sharpe, Sortino, Calmar and volatility are measured over the "
+      f"{qm['n_obs']} trading days actually traded (rf = 0), from daily returns "
+      f"chained off logged equity. The only annualized figure is **Ann. return**, "
+      f"an EXTRAPOLATION: the period return compounded to 252 trading days — "
+      f"a projection, not a measurement._\n")
+    A(f"- Period return **{qm['period_ret']:+.2f}%**  |  Period vol {qm['period_vol']:.2f}%  |  "
+      f"Max drawdown {qm['max_dd']:.2f}%")
     A(f"- Sharpe: **{qm['sharpe']:.2f}**   |   Sortino: **{qm['sortino']:.2f}**   |   Calmar: {qm['calmar']:.2f}")
-    A(f"- Ann. return {qm['ann_ret']:+.1f}%  |  Ann. vol {qm['ann_vol']:.1f}%  |  Max drawdown {qm['max_dd']:.2f}%")
+    A(f"- Ann. return (extrapolated) {qm['ann_ret']:+.1f}%")
     A(f"- Beta vs SPY {qm['beta_spy']:.2f} (corr {qm['corr_spy']:.2f})")
     A(f"- Up-capture {qm['up_capture']:.0f}%  |  Down-capture {qm['down_capture']:.0f}%  "
       f"{'← winning by losing less' if qm['down_capture'] < qm['up_capture'] else ''}")
@@ -399,6 +443,11 @@ def main():
 
     pos, port, trades = load()
     month_tag = port["date"].max().strftime("%Y-%m")
+    # Only trades up to the end of the reviewed month (New York date): the
+    # next month's rebalance can be placed before its first daily-log row.
+    cutoff = pd.Period(month_tag, "M").end_time
+    ts = pd.to_datetime(trades["timestamp"], utc=True).dt.tz_convert("America/New_York").dt.tz_localize(None)
+    trades = trades[ts <= cutoff].reset_index(drop=True)
     outdir = _HERE / "month_end" / month_tag
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -416,7 +465,9 @@ def main():
     print("=" * 66)
     print(f"  Return   : {qm['total_ret']:+.2f}%   (SPY {qm['spy_since']:+.2f}%, QQQ {qm['qqq_since']:+.2f}%)")
     print(f"  Alpha    : vs SPY {qm['alpha_spy']:+.2f}pp | vs QQQ {qm['alpha_qqq']:+.2f}pp")
-    print(f"  Sharpe   : {qm['sharpe']:.2f}   Sortino {qm['sortino']:.2f}   MaxDD {qm['max_dd']:.2f}%")
+    print(f"  Period   : {qm['n_obs']}d  Sharpe {qm['sharpe']:.2f}   Sortino {qm['sortino']:.2f}   "
+          f"Calmar {qm['calmar']:.2f}   vol {qm['period_vol']:.2f}%  (not annualized)")
+    print(f"  Ann. ret : {qm['ann_ret']:+.1f}% (extrapolated)   MaxDD {qm['max_dd']:.2f}%")
     print(f"  Beta     : {qm['beta_spy']:.2f}   Up-cap {qm['up_capture']:.0f}%  Down-cap {qm['down_capture']:.0f}%")
     print(f"  Hit rate : {qm['hit_rate']:.0f}%  ({qm['win_days']}W/{qm['lose_days']}L)")
     if len(pm_exits):

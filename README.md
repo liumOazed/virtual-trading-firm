@@ -596,27 +596,36 @@ QQQ +0.1%, GLD -6.3% ($37,762 at cost).
 | Return since go-live   | **+1.96%** | +3.44%  | +4.51%  |
 | Alpha                   | —          | -1.48pp | -2.55pp |
 
-**Risk-adjusted** (annualized from daily):
+**Risk-adjusted** — measured over the 79 trading days actually traded, not
+annualized (daily returns chained from logged equity, rf = 0):
 
-| Sharpe    | Sortino   | Calmar    | Ann. return | Ann. vol | Max drawdown |
-| --------- | --------- | --------- | ----------- | -------- | ------------- |
-| **-0.17** | **-0.28** | **-0.44** | -2.9%       | 17.0%    | **-6.47%**    |
+| Period return | Sharpe   | Sortino  | Calmar   | Period vol | Max drawdown | Ann. return (extrapolated) |
+| ------------- | -------- | -------- | -------- | ---------- | ------------- | -------------------------- |
+| **+1.96%**    | **0.26** | **0.37** | **0.30** | 9.13%      | **-6.47%**    | +6.4%                      |
 
-Beta vs SPY 0.83 (corr 0.60) · up-capture 74% / down-capture 89% (now losing
-more on down days than it captures on up days) · hit rate 47% (36W/40L) ·
-best day +2.66% · worst -2.97%.
+_Same method as ARIA-Momentum: only **Ann. return** is annualized, as an
+**extrapolation** of the 79-day return to 252 trading days — not a measured
+result. Daily returns now come from the logged equity curve; the logger's
+own day-change column was measured against a sometimes-stale Alpaca
+prior-day value (e.g. 2026-07-30 showed -2.16% on a +0.83% day), which had
+pushed the previously published Sharpe to -0.17._
+
+Beta vs SPY 0.92 (corr 0.69) · up-capture 83% / down-capture 84% (losing
+about as much on down days as it captures on up days) · hit rate 46%
+(36W/43L) · best day +2.28% · worst -2.89%.
 
 **Month-by-month:**
 
 | Month     | Days | Book    | SPY    | QQQ    | vs SPY  | vs QQQ  |
 | --------- | ---- | ------- | ------ | ------ | ------- | ------- |
-| Jun 2026* | 16   | +1.48%  | +1.29% | +4.04% | +0.19pp | -2.56pp |
+| Jun 2026* | 16   | +1.42%  | +1.28% | +4.04% | +0.14pp | -2.62pp |
 | Jul 2026  | 21   | -3.24%  | +0.05% | -6.57% | -3.29pp | +3.33pp |
 | Aug 2026  | 21   | +10.15% | +2.69% | +4.18% | +7.46pp | +5.97pp |
 | Sep 2026  | 21   | -5.68%  | -0.60% | +3.21% | -5.08pp | -8.89pp |
 
-_* partial month — June starts at the 2026-06-09 go-live. August is now a
-full month (revised from the partial +10.35% shown in the Aug 31 report)._
+_* partial month — June starts at the 2026-06-09 go-live capital. The four
+months compound exactly to the since-go-live return. August is a full month
+(revised from the partial +10.35% shown in the Aug 31 report)._
 
 16 open positions (10 in profit as of 2026-09-30); best PLTR +40.6%, worst
 EQT -9.1% (danger zone, <10pt to stop: EQT, EXE, VST, CVNA, BG). 10 exits
