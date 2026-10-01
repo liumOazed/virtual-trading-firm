@@ -536,11 +536,17 @@ measured from the 2026-06-15 open, when capital went live._
 | Return since inception  | **+5.46%** | +1.43%  | +0.23%  |
 | Alpha                    | —          | +4.03pp | +5.23pp |
 
-**Risk-adjusted** (annualized from daily close-to-close returns — small sample):
+**Risk-adjusted** — measured over the 75 trading days actually traded, not
+annualized (daily close-to-close returns, rf = 0):
 
-| Sharpe   | Sortino  | Calmar    | Ann. return | Ann. vol | Max drawdown                       |
-| -------- | -------- | --------- | ----------- | -------- | ----------------------------------- |
-| **3.90** | **9.34** | **15.04** | +18.0%      | 4.6%     | **-1.20%** (backtest budget -6.82%) |
+| Period return | Sharpe   | Sortino  | Calmar   | Period vol | Max drawdown                       | Ann. return (extrapolated) |
+| ------------- | -------- | -------- | -------- | ---------- | ----------------------------------- | -------------------------- |
+| **+5.46%**    | **2.13** | **4.39** | **4.57** | 2.51%      | **-1.20%** (backtest budget -6.82%) | +19.6%                     |
+
+_Only **Ann. return** is annualized, and it is an **extrapolation**: the
+75-day return compounded to 252 trading days — what a full year would look
+like if this pace held, not a measured result. Sharpe/Sortino/vol cover the
+75 days only; Calmar = period return ÷ max drawdown over the same window._
 
 Beta vs SPY 0.15 (corr 0.38) · up-capture 23% / down-capture -1% · hit rate
 55% (41W/34L) · best day +0.81% · worst -0.54% · avg capital deployed 24%.
@@ -564,10 +570,12 @@ annualized; CPI-U, BLS, seasonally adjusted, through the Aug 2026 print with
 September estimated) leaves a **+5.05% real gain** after about $515 of
 purchasing power lost to inflation.
 
-**Live vs backtest, same regime:** Bull-Stable live ann. return +18.0% vs
-the locked backtest's +26.2% for that regime, live Sharpe **3.90** vs
-backtest 1.33, live max DD -1.20% vs backtest -6.72% — live continues to
-run tighter and more consistent than the backtest expects for this regime.
+**Live vs backtest, same regime:** Bull-Stable live ann. return +19.6%
+(extrapolated from 75 days) vs the locked backtest's +26.2% for that regime;
+live 75-day Sharpe **2.13** vs **0.73** for the backtest over the same
+horizon (its annual 1.33 × √(75/252)); live max DD -1.20% vs backtest -6.72%
+— live continues to run tighter and more consistent than the backtest
+expects for this regime.
 19 closed round trips since go-live: 13W/6L (all 5 closed in September were
 winners), losers avg hold 5.5d (fast loser exits = min-hold design working),
 winners avg hold 11.8d. Book carries three open positions — AMZN +0.9%,

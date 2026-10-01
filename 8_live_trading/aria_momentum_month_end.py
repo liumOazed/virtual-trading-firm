@@ -130,6 +130,36 @@ def cross_check(hist, eq):
 # ══════════════════════════════════════════════════════════════════════════════
 # QUANT METRICS  (from daily_history.csv)
 # ══════════════════════════════════════════════════════════════════════════════
+def period_stats(r, eqv) -> dict:
+    """Risk/return over the ACTUAL trading days only — nothing annualized
+    except ann_ret, which is an explicit extrapolation.
+
+      period_ret  compounded return over the n days
+      ann_ret     EXTRAPOLATED: (1 + period_ret)^(252/n) − 1 — what the period
+                  return would compound to over a year if repeated; a
+                  projection, not a measurement
+      period_vol  daily stdev × √n             (volatility over the period)
+      sharpe      mean / stdev × √n            (period Sharpe, rf = 0)
+      sortino     mean / downside dev × √n     downside dev = √mean(min(r,0)²)
+      calmar      period_ret / |max drawdown|  (same window, no annualizing)
+    """
+    r = np.asarray(r, dtype=float)
+    r = r[~np.isnan(r)]
+    n = len(r)
+    out = {"n_obs": n}
+    out["period_ret"] = (np.prod(1 + r) - 1) * 100
+    out["ann_ret"]    = ((1 + out["period_ret"] / 100) ** (TRADING_DAYS / n) - 1) * 100 if n else np.nan
+    mu, sd = (r.mean(), r.std(ddof=1)) if n > 1 else (np.nan, np.nan)
+    dsd = np.sqrt(np.mean(np.minimum(r, 0) ** 2)) if n else np.nan
+    out["period_vol"] = sd * np.sqrt(n) * 100 if sd > 0 else np.nan
+    out["sharpe"]     = mu / sd * np.sqrt(n) if sd > 0 else np.nan
+    out["sortino"]    = mu / dsd * np.sqrt(n) if dsd > 0 else np.nan
+    eqv = np.asarray(eqv, dtype=float)
+    out["max_dd"] = (eqv / np.maximum.accumulate(eqv) - 1).min() * 100 if len(eqv) > 1 else 0.0
+    out["calmar"] = out["period_ret"] / abs(out["max_dd"]) if out["max_dd"] < 0 else np.nan
+    return out
+
+
 def quant_metrics(hist: pd.DataFrame) -> dict:
     m = {}
     m["start"], m["end"] = hist["date"].iloc[0], hist["date"].iloc[-1]
@@ -150,19 +180,11 @@ def quant_metrics(hist: pd.DataFrame) -> dict:
     m["alpha_spy"] = hist["alpha_vs_spy"].iloc[-1]
     m["alpha_qqq"] = hist["alpha_vs_qqq"].iloc[-1]
 
-    mu, sd = np.nanmean(r), np.nanstd(r, ddof=1)
-    dn_dev = np.nanstd(np.minimum(r, 0), ddof=1)
-    m["ann_ret"] = mu * TRADING_DAYS * 100
-    m["ann_vol"] = sd * np.sqrt(TRADING_DAYS) * 100 if sd > 0 else np.nan
-    m["sharpe"]  = mu / sd * np.sqrt(TRADING_DAYS) if sd > 0 else np.nan
-    m["sortino"] = mu / dn_dev * np.sqrt(TRADING_DAYS) if dn_dev > 0 else np.nan
-
     eqv  = hist["equity"].values
     peak = np.maximum.accumulate(eqv)
     dd   = eqv / peak - 1
     m["dd_series"] = dd * 100
-    m["max_dd"]    = dd.min() * 100
-    m["calmar"]    = m["ann_ret"] / abs(m["max_dd"]) if m["max_dd"] < 0 else np.nan
+    m.update(period_stats(r, eqv))
 
     mask = ~np.isnan(r) & ~np.isnan(spy_r)
     if mask.sum() > 2 and np.nanstd(spy_r[mask]) > 0:
@@ -202,16 +224,11 @@ def regime_attribution(hist: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for regime, g in hist.groupby("regime"):
         r = g["daily_pnl_pct"].values / 100.0
-        n = len(g)
-        mu, sd = np.nanmean(r), np.nanstd(r, ddof=1) if n > 1 else np.nan
-        eqv = g["equity"].values
-        dd = (eqv / np.maximum.accumulate(eqv) - 1).min() * 100 if n > 1 else 0.0
+        s = period_stats(r, g["equity"].values)
         rows.append({
-            "regime": regime, "days": n,
-            "period_ret": (np.prod(1 + np.nan_to_num(r)) - 1) * 100,
-            "ann_ret": mu * TRADING_DAYS * 100,
-            "sharpe": (mu / sd * np.sqrt(TRADING_DAYS)) if sd and sd > 0 else np.nan,
-            "max_dd": dd,
+            "regime": regime, "days": len(g),
+            "period_ret": s["period_ret"], "ann_ret": s["ann_ret"],
+            "sharpe": s["sharpe"], "max_dd": s["max_dd"],
             "hit_rate": (r > 0).sum() / max((r != 0).sum(), 1) * 100,
         })
     out = pd.DataFrame(rows).sort_values("days", ascending=False).reset_index(drop=True)
@@ -227,10 +244,14 @@ def backtest_parity(reg_attr: pd.DataFrame) -> pd.DataFrame:
         bt = BACKTEST["regimes"].get(r["regime"])
         if bt is None:
             continue
+        # Live Sharpe covers only the live days; the backtest's is annual.
+        # Sharpe scales with √time, so put the backtest on the same horizon.
+        horizon = np.sqrt(r["days"] / TRADING_DAYS)
         rows.append({
             "regime": r["regime"], "days_live": r["days"],
             "live_ann": r["ann_ret"],  "bt_ann": bt["ann_ret"],
-            "live_sharpe": r["sharpe"], "bt_sharpe": bt["sharpe"],
+            "live_sharpe": r["sharpe"], "bt_sharpe": bt["sharpe"] * horizon,
+            "bt_sharpe_annual": bt["sharpe"],
             "live_dd": r["max_dd"],     "bt_dd": bt["max_dd"],
         })
     return pd.DataFrame(rows)
@@ -565,7 +586,7 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path, infl
         fig, axes = plt.subplots(1, len(parity), figsize=(4.6 * len(parity), 4),
                                  squeeze=False)
         for ax, (_, row) in zip(axes[0], parity.iterrows()):
-            labels = ["Ann ret %", "Sharpe", "Max DD %"]
+            labels = ["Ann ret % (live extrap.)", f"Sharpe ({int(row['days_live'])}d)", "Max DD %"]
             live = [row["live_ann"], row["live_sharpe"], row["live_dd"]]
             bt   = [row["bt_ann"], row["bt_sharpe"], row["bt_dd"]]
             x = np.arange(3); w = 0.38
@@ -575,7 +596,7 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path, infl
             ax.axhline(0, color=MGREY, lw=0.8)
             ax.legend(fontsize=7)
             _style(ax, f"{row['regime']}")
-        plt.suptitle("Live vs locked-backtest expectation, per regime "
+        plt.suptitle("Live vs locked-backtest expectation, per regime\n"
                      "(tiny live sample — directional only)",
                      fontsize=10, color=GREY)
         plt.tight_layout()
@@ -756,12 +777,18 @@ def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
               f"{r['real_ret_pct']:+.2f}% | {'est.' if r['cpi_is_estimate'] else 'actual'} |")
         A("")
 
-    A("## Risk-adjusted (annualized from daily — small sample!)")
+    A(f"## Risk-adjusted (over the {qm['n_obs']} trading days — not annualized)")
+    A(f"_Sharpe, Sortino, Calmar and volatility are measured over the "
+      f"{qm['n_obs']} trading days actually traded (rf = 0). The only "
+      f"annualized figure is **Ann. return**, an EXTRAPOLATION: the period "
+      f"return compounded to 252 trading days, i.e. what a full year would "
+      f"look like if this pace held — a projection, not a measurement._\n")
+    A(f"- Period return **{qm['period_ret']:+.2f}%** · period volatility "
+      f"{qm['period_vol']:.2f}% · max drawdown **{qm['max_dd']:.2f}%** "
+      f"(backtest budget {BACKTEST['max_dd']}%)")
     A(f"- Sharpe **{qm['sharpe']:.2f}** · Sortino **{qm['sortino']:.2f}** · "
       f"Calmar {qm['calmar']:.2f}")
-    A(f"- Ann. return {qm['ann_ret']:+.1f}% · ann. vol {qm['ann_vol']:.1f}% · "
-      f"max drawdown **{qm['max_dd']:.2f}%** "
-      f"(backtest budget {BACKTEST['max_dd']}%)")
+    A(f"- Ann. return (extrapolated) {qm['ann_ret']:+.1f}%")
     A(f"- Beta vs SPY {qm['beta_spy']:.2f} (corr {qm['corr_spy']:.2f}) · "
       f"up-capture {qm['up_capture']:.0f}% · down-capture {qm['down_capture']:.0f}%")
     A(f"- Hit rate {qm['hit_rate']:.0f}% ({qm['win_days']}W/{qm['lose_days']}L) · "
@@ -769,7 +796,7 @@ def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
     A(f"- Avg capital deployed {qm['avg_deployed']:.0f}%\n")
 
     A("## Regime attribution  *(signature)*")
-    A("| Regime | Days | Period ret | Ann ret | Sharpe | Max DD | Hit |")
+    A("| Regime | Days | Period ret | Ann ret (extrap.) | Sharpe (period) | Max DD | Hit |")
     A("|---|---|---|---|---|---|---|")
     for _, r in reg_attr.iterrows():
         A(f"| {r['regime']} | {int(r['days'])} | {r['period_ret']:+.2f}% | "
@@ -779,14 +806,18 @@ def write_report(qm, reg_attr, parity, trips, opos, mbm, hold_note, xcheck,
 
     A("## Backtest parity  *(signature)*")
     A("_Live per-regime vs the locked 95.55% backtest's expectation for the "
-      "same regime. With days this few, read direction, not magnitude._\n")
+      "same regime. With days this few, read direction, not magnitude. "
+      "Live ann. return is extrapolated from the live days. Live Sharpe covers "
+      "only the live days, so the backtest's annual Sharpe is scaled to the "
+      "same horizon (× √(days/252)) to compare like with like._\n")
     if len(parity):
-        A("| Regime | Live days | Live ann | BT ann | Live Sharpe | BT Sharpe | Live DD | BT DD |")
+        A("| Regime | Live days | Live ann (extrap.) | BT ann | Live Sharpe | "
+          "BT Sharpe, same horizon (annual) | Live DD | BT DD |")
         A("|---|---|---|---|---|---|---|---|")
         for _, r in parity.iterrows():
             A(f"| {r['regime']} | {int(r['days_live'])} | {r['live_ann']:+.1f}% | "
-              f"{r['bt_ann']:+.1f}% | {r['live_sharpe']:.2f} | {r['bt_sharpe']:.2f} | "
-              f"{r['live_dd']:.2f}% | {r['bt_dd']:.2f}% |")
+              f"{r['bt_ann']:+.1f}% | {r['live_sharpe']:.2f} | {r['bt_sharpe']:.2f} "
+              f"({r['bt_sharpe_annual']:.2f}) | {r['live_dd']:.2f}% | {r['bt_dd']:.2f}% |")
     else:
         A("No overlapping regimes yet.")
     A("")
@@ -877,7 +908,9 @@ def main():
     print(f"  Return   : {qm['total_ret']:+.2f}%   "
           f"(SPY {qm['spy_since']:+.2f}%, QQQ {qm['qqq_since']:+.2f}%)")
     print(f"  Alpha    : vs SPY {qm['alpha_spy']:+.2f}pp | vs QQQ {qm['alpha_qqq']:+.2f}pp")
-    print(f"  Sharpe   : {qm['sharpe']:.2f}   Sortino {qm['sortino']:.2f}   "
+    print(f"  Period   : {qm['n_obs']}d  Sharpe {qm['sharpe']:.2f}   Sortino {qm['sortino']:.2f}   "
+          f"Calmar {qm['calmar']:.2f}   vol {qm['period_vol']:.2f}%  (not annualized)")
+    print(f"  Ann. ret : {qm['ann_ret']:+.1f}% (extrapolated)   "
           f"MaxDD {qm['max_dd']:.2f}%  (backtest budget {BACKTEST['max_dd']}%)")
     print(f"  Beta     : {qm['beta_spy']:.2f}   up-cap {qm['up_capture']:.0f}%  "
           f"down-cap {qm['down_capture']:.0f}%")
