@@ -45,7 +45,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 warnings.filterwarnings("ignore")
 
@@ -267,6 +267,13 @@ def exit_postmortem(trades: pd.DataFrame, fetch: bool = True):
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARTS
 # ══════════════════════════════════════════════════════════════════════════════
+def _thin_dates(fig, n=14):
+    """Show at most ~n evenly spaced date labels (all dates crowded the axis)."""
+    for ax in fig.axes:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=n, integer=True))
+        ax.tick_params(axis="x", labelrotation=45)
+
+
 def _style(ax, title, ylabel=None):
     ax.set_title(title, fontsize=11, color=NAVY, weight="bold", loc="left")
     if ylabel: ax.set_ylabel(ylabel, fontsize=9, color=GREY)
@@ -286,7 +293,7 @@ def make_charts(port, qm, pm_pos, pm_exits, mbm, outdir: Path):
     ax.plot(dates, qm["idx_qqq"], color=AMBER, lw=1.4, ls="--", label="QQQ")
     ax.axhline(100, color=MGREY, lw=0.8)
     ax.legend(fontsize=8); _style(ax, "Equity vs benchmarks (indexed to 100)")
-    plt.xticks(rotation=45); plt.tight_layout()
+    _thin_dates(fig); plt.tight_layout()
     fig.savefig(outdir / "equity_vs_benchmarks.png", dpi=150); plt.close(fig)
 
     # 2. Drawdown
@@ -294,7 +301,7 @@ def make_charts(port, qm, pm_pos, pm_exits, mbm, outdir: Path):
     ax.fill_between(dates, qm["dd_series"], 0, color=RED, alpha=0.35)
     ax.plot(dates, qm["dd_series"], color=RED, lw=1.2)
     _style(ax, f"Drawdown (max {qm['max_dd']:.2f}%)", "%")
-    plt.xticks(rotation=45); plt.tight_layout()
+    _thin_dates(fig); plt.tight_layout()
     fig.savefig(outdir / "drawdown.png", dpi=150); plt.close(fig)
 
     # 3. Return distribution + capture

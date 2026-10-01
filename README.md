@@ -526,9 +526,9 @@ records (fills, fees and official end-of-day equity) by
 every posted day. This replaces the earlier self-logged history, whose rows
 were a mix of opening snapshots and afternoon snapshots stamped with the next
 day's date. Figures therefore differ from previously published versions,
-including July and August. Two days use the ledger's reconstruction instead
+including July and August. One day uses the ledger's reconstruction instead
 of Alpaca's daily figure: 2026-07-29, where Alpaca's record repeats the prior
-day, and 2026-09-30, not yet posted by Alpaca at report time. Benchmarks are
+day. The 2026-09-30 close is Alpaca's official figure ($105,460.28). Benchmarks are
 measured from the 2026-06-15 open, when capital went live._
 
 | Metric                  | Book       | SPY     | QQQ     |

@@ -119,3 +119,9 @@ _docs_v1/
 # local trace artifacts
 /trace.json
 /trace_report.html
+
+# Google Drive folder metadata (must come after the month_end re-includes)
+**/desktop.ini
+
+# live engine runtime state (changes every run)
+/8_live_trading/data/position_hold_state.json

@@ -60,6 +60,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 warnings.filterwarnings("ignore")
 
@@ -527,6 +528,13 @@ def hold_duration_note(trips: pd.DataFrame) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARTS
 # ══════════════════════════════════════════════════════════════════════════════
+def _thin_dates(fig, n=14):
+    """Show at most ~n evenly spaced date labels (all dates crowded the axis)."""
+    for ax in fig.axes:
+        ax.xaxis.set_major_locator(MaxNLocator(nbins=n, integer=True))
+        ax.tick_params(axis="x", labelrotation=45)
+
+
 def _style(ax, title, ylabel=None):
     ax.set_title(title, fontsize=11, color=NAVY, weight="bold", loc="left")
     if ylabel:
@@ -554,7 +562,7 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path, infl
     ax.axhline(100, color=MGREY, lw=0.8)
     ax.legend(fontsize=8)
     _style(ax, "Equity vs benchmarks (indexed to 100, background = regime)")
-    plt.xticks(rotation=45); plt.tight_layout()
+    _thin_dates(fig); plt.tight_layout()
     fig.savefig(outdir / "equity_vs_benchmarks.png", dpi=150); plt.close(fig)
 
     # 2 — drawdown
@@ -565,7 +573,7 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path, infl
                label=f"backtest max DD {BACKTEST['max_dd']}%")
     ax.legend(fontsize=8)
     _style(ax, f"Drawdown (live max {qm['max_dd']:.2f}%)", "%")
-    plt.xticks(rotation=45); plt.tight_layout()
+    _thin_dates(fig); plt.tight_layout()
     fig.savefig(outdir / "drawdown.png", dpi=150); plt.close(fig)
 
     # 3 — regime attribution (signature)
@@ -645,7 +653,7 @@ def make_charts(hist, qm, reg_attr, parity, trips, opos, mbm, outdir: Path, infl
     a2.plot(dates, qm["unrealized"], color=AMBER, lw=1.6, label="Unrealized P&L $")
     a2.axhline(0, color=MGREY, lw=0.8); a2.legend(fontsize=8)
     _style(a2, "Realized vs unrealized P&L", "$")
-    plt.xticks(rotation=45); plt.tight_layout()
+    _thin_dates(fig); plt.tight_layout()
     fig.savefig(outdir / "deployment_pnl_split.png", dpi=150); plt.close(fig)
 
     # 8 — month-by-month return comparison
