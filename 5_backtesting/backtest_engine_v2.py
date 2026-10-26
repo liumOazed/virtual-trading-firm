@@ -70,8 +70,8 @@ class BacktestConfig:
 
     use_sector_models:  bool = True
     sector_tickers: List[str] = field(default_factory=lambda: [
-        # Hardware
-        "NVDA", "AVGO", "TSM",
+        # Hardware (NVDA is a global anchor)
+        "AVGO", "TSM",
         # Hypercloud
         "MSFT", "GOOGL", "AMZN", "META",
         # Autos
@@ -83,7 +83,7 @@ class BacktestConfig:
     ])
 
     global_tickers: List[str] = field(default_factory=lambda:
-        ["AAPL", "QQQ"])
+        ["AAPL", "NVDA"])
 
     # C10 removed — hedge_tickers empty
     hedge_tickers: List[str] = field(default_factory=lambda: [])

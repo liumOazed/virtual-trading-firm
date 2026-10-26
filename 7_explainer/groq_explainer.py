@@ -121,7 +121,7 @@ EXIT_REASONS = {
     "tsla_ext_exit":   "TSLA extension exit — price exceeded 120% above 200-day MA",
     "tsla_bear":       "TSLA bear regime exit — HMM flipped to Bear-Trending or Bear-Stress",
     "regime_exit":     "Sector not active in current HMM regime — position force-exited",
-    "anchor_reentry":  "Anchor re-entry on bull flip — AAPL/QQQ deployed on regime transition",
+    "anchor_reentry":  "Anchor re-entry on bull flip — AAPL/NVDA deployed on regime transition",
     "trend_add":       "Pyramid add — position up 5%+ after 10+ bars, added 5% more",
     "mr_exit":         "Mean-reversion exit — Z-score recovered to target",
     "mr_stop":         "Mean-reversion stop — Z-score breakdown (relationship broken)",
@@ -147,7 +147,7 @@ Key exit mechanisms:
 - bear_heat_trim: HMM confirmed bear, sells highest-heat positions until heat < 30%
 - tsla_peak_exit: RSI momentum-loss from overbought on TSLA specifically
 - regime_exit: position's sector not active in current regime
-- anchor_reentry: AAPL+QQQ deployed immediately on bull regime flip
+- anchor_reentry: AAPL+NVDA deployed immediately on bull regime flip
 
 Backtest result: +102% total return / Sharpe 1.35 / Max DD -10.1% vs SPY +140% / DD -24.5%
 
