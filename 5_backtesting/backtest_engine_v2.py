@@ -1813,7 +1813,7 @@ class BacktestEngineV2:
 
 if __name__ == "__main__":
     cfg = BacktestConfig(
-        tickers           = ["AAPL", "QQQ", "SPY"],
+        tickers           = ["AAPL", "NVDA", "SPY"],
         start_date        = "2020-01-01",
         end_date          = "2026-05-28",
         initial_capital   = 100_000,
