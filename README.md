@@ -11,13 +11,102 @@
 ---
 
 ## ARIA Momentum — Execution Pipeline
-<img width="2720" height="2800" alt="aria_momentum_daily_run_cycle" src="https://github.com/user-attachments/assets/38c0fac2-f020-4b0a-855b-61f6af4802b0" />
 
-### Now the inside of step 3 — where the actual trading decisions get made:
-<img width="2720" height="1696" alt="aria_momentum_signal_decision_engine" src="https://github.com/user-attachments/assets/d8550c8f-aa06-4958-9e21-508b55499e47" />
+### How the live engine decides what to trade
 
-### Full ML Decision Pipeline:
-<img width="2720" height="3984" alt="aria_full_ml_decision_pipeline" src="https://github.com/user-attachments/assets/018c95ab-8cd0-4ca1-812f-c7942c62ab94" />
+Every evening after the US close, `run_live.py` scores 16 tickers, decides exits and entries, and places paper orders on Alpaca. This traces `8_live_trading/live_engine.py` as it stands on main today.
+
+> **Changing Oct 31:** PR #1 swaps the anchor QQQ for NVDA. After it merges, the anchors that bypass the regime gate and get re-bought on a bull flip are AAPL and NVDA. Details are in [What PR #1 changes on Oct 31](#what-pr-1-changes-on-oct-31) below.
+
+```mermaid
+flowchart TD
+    A["Daily run after US close<br/>run_live.py"] --> B["Read Alpaca account, positions, prices<br/>top up last 5 days of bars · bars-held +1 per held ticker"]
+    B --> C["HMM regime from SPY features<br/>Bull-Trending · Bull-Stable · Bear-Stable · Bear-Stress<br/>compared with yesterday to spot a Bear → Bull flip"]
+    C --> D["Global XGBoost scores every ticker<br/>proba_buy for all 16 tickers"]
+    D --> E["Sector XGBoost replaces score + buy line<br/>only if sector is active in this regime, or ticker is held"]
+
+    E --> X1
+    E --> N1
+    E --> T1
+    E --> R1
+
+    subgraph EXITS["Exits · every held ticker (no regime gate)"]
+        X1{"Score below sell line?<br/>sector buy line × 0.80, else 0.45"}
+        X1 -- no --> XH1["Keep holding"]
+        X1 -- yes --> X2{"Held under 3 bars<br/>and in profit?"}
+        X2 -- yes --> XH2["Hold for now<br/>(minimum-hold guard)"]
+        X2 -- no --> XS["SELL signal<br/>close the whole position"]
+    end
+
+    subgraph ENTRIES["Entries"]
+        N1{"Passes the regime gate?<br/>AAPL, QQQ: always (anchors)<br/>others: only if sector is active"}
+        N1 -- no --> NN1["No buy"]
+        N1 -- yes --> N2{"Already held, or TSLA?"}
+        N2 -- yes --> NN2["Skip"]
+        N2 -- no --> N3{"Score above buy line?<br/>sector line, or 0.50 / 0.52 / 0.58 by regime"}
+        N3 -- no --> NN3["No buy"]
+        N3 -- yes --> NB["BUY signal<br/>18 / 12 / 10 / 8 % of equity by regime"]
+    end
+
+    subgraph OVERRIDES["Overrides"]
+        T1["TSLA Strategy A<br/>SELL if held and RSI rolls over from &gt;70,<br/>price &gt;120% above MA200, or Bear-Stress<br/>BUY in Bull-Trending if RSI 42–62 rising,<br/>−10% to +60% vs MA200 · size 9.6%"]
+        R1{"Regime just flipped<br/>Bear → Bull?"}
+        R1 -- yes --> R2["BUY AAPL and QQQ if not held<br/>24% each if bear ≤ 30 bars, else 22%<br/>no score check"]
+    end
+
+    XS --> L["One list of signals"]
+    NB --> L
+    T1 --> L
+    R2 --> L
+    L --> EX["Execute on the Alpaca paper account<br/>1. Sells first: close each position, wait for the fill<br/>2. Refresh buying power, budget 95% of it<br/>3. Buys in list order: skip if held or over remaining budget"]
+    EX --> F["Log trades · post-fill equity snapshot<br/>reconcile estimated fills · optional Groq briefing (--explain)"]
+
+    classDef sell fill:#f8e9e7,stroke:#b03a2e,color:#18202b
+    classDef buy fill:#e6f3ec,stroke:#1f7a4d,color:#18202b
+    classDef over fill:#fbf1df,stroke:#9a6410,color:#18202b
+    class XS sell
+    class NB buy
+    class T1,R2 over
+```
+
+Exits and entries are evaluated separately: a held position can be sold even when its sector is switched off for the regime, but a new position needs to pass the gate. The override rules add signals outside the normal scoring.
+
+#### Step by step
+
+1. **Read the account and refresh prices.** Pull equity, cash and positions from Alpaca, top up the last 5 days of bars, and add one to the bars-held counter for each held ticker (once per calendar day, stored in `position_hold_state.json`).
+2. **Detect the regime.** The saved HMM detector (`hmm_detector.pkl`) labels the day as one of four regimes. The engine stores yesterday's label in `regime_state.json`, counts how long a bear has lasted, and flags a fresh Bear → Bull flip.
+3. **Score with the global model.** The global XGBoost model gives every ticker a buy probability. This is the only score AAPL and QQQ ever get, since they belong to no sector.
+4. **Override with sector models.** For tickers whose sector is active in this regime, or that are already held, the sector model's probability and its own buy line replace the global ones.
+5. **Check every held position for an exit.** Sell if the score is below the sell line: the sector buy line × 0.80 when there is one, otherwise 0.45. Exits ignore the regime gate. The only brake is the minimum hold: a position under 3 bars old that is in profit is kept.
+6. **Run TSLA Strategy A.** TSLA is skipped by the normal buy logic and runs on RSI and 200-day average rules instead, every day, in any regime.
+7. **Find new entries.** A ticker is a candidate only if it passes the regime gate (anchors always do), is not held, and is not TSLA. It is bought when its score beats the buy line. Size is a fixed share of equity set by the regime.
+8. **Re-enter anchors on a bull flip.** On the first bull day after a bear, AAPL and QQQ are bought if not held, at 24% of equity each after a short bear (30 bars or fewer) or 22% after a long one, with no score check.
+9. **Execute and record.** Sells go first to free cash. Buys then run in order against 95% of fresh buying power, skipping anything held or unaffordable. Trades and a post-fill equity snapshot are logged, estimated fills are reconciled, and an optional Groq briefing is written.
+
+#### The numbers by regime
+
+| Regime        | Sectors that can buy  | Tickers through the gate                          | Buy line (no sector model) | Position size |
+| ------------- | --------------------- | ------------------------------------------------- | -------------------------- | ------------- |
+| Bull-Trending | hardware, autos, gold | NVDA, AVGO, TSM, RACE, GLD (+TSLA via Strategy A) | 0.50                       | 18%           |
+| Bull-Stable   | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD                      | 0.52                       | 12%           |
+| Bear-Stable   | defensive, gold       | XOM, CVX, PG, WMT, GLD                            | 0.58                       | 10%           |
+| Bear-Stress   | defensive, gold       | XOM, CVX, PG, WMT, GLD                            | 0.58                       | 8%            |
+
+AAPL and QQQ pass the gate in every regime and always use the global score with the buy line in the fourth column.
+
+| Sector model           | Tickers                 | Buy line | Sell line (× 0.80) |
+| ---------------------- | ----------------------- | -------- | ------------------ |
+| Hardware               | NVDA, AVGO, TSM         | 0.52     | 0.416              |
+| Hypercloud             | MSFT, GOOGL, AMZN, META | 0.53     | 0.424              |
+| Autos                  | TSLA, RACE              | 0.55     | 0.440              |
+| Defensive              | XOM, CVX, PG, WMT       | 0.55     | 0.440              |
+| Gold (defensive model) | GLD                     | 0.55     | 0.440              |
+
+The comment at the top of `sector_signal_engine.py` lists older lines (0.38, 0.30, 0.34). The registry values above are what the engine reads.
+
+#### What PR #1 changes on Oct 31
+
+The anchor set becomes **AAPL and NVDA**, in both the regime gate and the bull-flip re-entry. NVDA also leaves the hardware sector, so it will be scored only by the global model and bought against the regime buy line (0.50 / 0.52 / 0.58) in any regime, rather than only in Bull-Trending at 0.52. QQQ stays in the ticker list but belongs to no sector and is no longer an anchor, so the engine will never buy it. If QQQ is held on the day of the merge, it can still be sold through the 0.45 global sell line.
 
 
 ## Current State (June 2026)
