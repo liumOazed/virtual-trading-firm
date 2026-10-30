@@ -312,7 +312,7 @@ The production layer added since going live on Alpaca:
 
 | Regime                      | Active Sectors        | Tradeable Tickers                |
 | --------------------------- | --------------------- | -------------------------------- |
-| Bull-Trending               | hardware, autos, gold | AVGO, TSM, TSLA, RACE, GLD       |
+| Bull-Trending               | hardware, autos, gold | NVDA, AVGO, TSM, TSLA, RACE, GLD |
 | Bull-Stable                 | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
 | Bear-Trending/Stable/Stress | defensive             | XOM, CVX, PG, WMT                |
 
