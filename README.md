@@ -88,7 +88,7 @@ Exits and entries are evaluated separately: a held position can be sold even whe
 | Regime        | Sectors that can buy  | Tickers through the gate                          | Buy line (no sector model) | Position size |
 | ------------- | --------------------- | ------------------------------------------------- | -------------------------- | ------------- |
 | Bull-Trending | hardware, autos, gold | NVDA, AVGO, TSM, RACE, GLD (+TSLA via Strategy A) | 0.50                       | 18%           |
-| Bull-Stable   | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD                      | 0.52                       | 12%           |
+| Bull-Stable   | hypercloud, hardware, gold | MSFT, GOOGL, AMZN, META, NVDA, AVGO, TSM, GLD | 0.52                       | 12%           |
 | Bear-Stable   | defensive, gold       | XOM, CVX, PG, WMT, GLD                            | 0.58                       | 10%           |
 | Bear-Stress   | defensive, gold       | XOM, CVX, PG, WMT, GLD                            | 0.58                       | 8%            |
 
@@ -106,7 +106,7 @@ The comment at the top of `sector_signal_engine.py` lists older lines (0.38, 0.3
 
 #### What PR #1 changes on Oct 31
 
-The anchor set becomes **AAPL and NVDA**, in both the regime gate and the bull-flip re-entry. NVDA also leaves the hardware sector, so it will be scored only by the global model and bought against the regime buy line (0.50 / 0.52 / 0.58) in any regime, rather than only in Bull-Trending at 0.52. QQQ stays in the ticker list but belongs to no sector and is no longer an anchor, so the engine will never buy it. If QQQ is held on the day of the merge, it can still be sold through the 0.45 global sell line.
+The anchor set becomes **AAPL and NVDA**, in both the regime gate and the bull-flip re-entry. NVDA also leaves the hardware sector, so it will be scored only by the global model and bought against the regime buy line (0.50 / 0.52 / 0.58) in any regime, rather than only in Bull-Trending and Bull-Stable at 0.52. QQQ stays in the ticker list but belongs to no sector and is no longer an anchor, so the engine will never buy it. If QQQ is held on the day of the merge, it can still be sold through the 0.45 global sell line.
 
 
 ## Current State (June 2026)
@@ -313,7 +313,7 @@ The production layer added since going live on Alpaca:
 | Regime                      | Active Sectors        | Tradeable Tickers                |
 | --------------------------- | --------------------- | -------------------------------- |
 | Bull-Trending               | hardware, autos, gold | NVDA, AVGO, TSM, TSLA, RACE, GLD |
-| Bull-Stable                 | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
+| Bull-Stable                 | hypercloud, hardware, gold | MSFT, GOOGL, AMZN, META, NVDA, AVGO, TSM, GLD |
 | Bear-Trending/Stable/Stress | defensive             | XOM, CVX, PG, WMT                |
 
 Anchors (AAPL, QQQ) bypass the gate and use the global model in all regimes.
