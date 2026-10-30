@@ -313,10 +313,12 @@ The production layer added since going live on Alpaca:
 | Regime                      | Active Sectors        | Tradeable Tickers                |
 | --------------------------- | --------------------- | -------------------------------- |
 | Bull-Trending               | hardware, autos, gold | NVDA, AVGO, TSM, TSLA, RACE, GLD |
-| Bull-Stable                 | hypercloud, hardware, gold | MSFT, GOOGL, AMZN, META, NVDA, AVGO, TSM, GLD |
+| Bull-Stable                 | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
 | Bear-Trending/Stable/Stress | defensive             | XOM, CVX, PG, WMT                |
 
 Anchors (AAPL, QQQ) bypass the gate and use the global model in all regimes.
+
+From Oct 31, 2026, hardware is also active in Bull-Stable as a one-month test, so its tickers pass the gate there too.
 
 ---
 
