@@ -7,7 +7,7 @@ Routes each ticker to its correct sector PKL at inference time.
 Returns proba_buy with sector-native threshold per ticker.
 
 Sector → PKL → Tickers → Native threshold:
-  Hardware   → hardware_model.pkl   → NVDA, AVGO, ASML, AMD, TSM  → 0.38
+  Hardware   → hardware_model.pkl   → AVGO, ASML, AMD, TSM        → 0.38
   Hypercloud → hypercloud_model.pkl → MSFT, GOOGL, AMZN, META     → 0.53
   Autos      → autos_model.pkl      → GM, F, TSLA, TM, RACE       → 0.30
   Defensive  → defensive_model.pkl  → XOM, CVX, PG, WMT, GLD      → 0.34
@@ -56,7 +56,7 @@ SECTOR_REGISTRY = {
     "hardware": {
         "name":            "Hardware / Semiconductor",
         "pkl":             "4_signals/models/hardware_model.pkl",
-        "tickers":         ["NVDA", "AVGO", "ASML", "AMD", "TSM"],
+        "tickers":         ["AVGO", "ASML", "AMD", "TSM"],  # NVDA moved to global anchors
         "native_threshold": 0.52,
         "deploy_regimes":  ["Bull-Trending"],
     },
@@ -421,7 +421,7 @@ if __name__ == "__main__":
     # test ticker routing
     print("\n  Ticker routing test:")
     test_cases = [
-        ("NVDA",  "Bull-Trending"),
+        ("AVGO",  "Bull-Trending"),
         ("MSFT",  "Bull-Stable"),
         ("TSLA",  "Bull-Trending"),
         ("XOM",   "Bear-Stress"),

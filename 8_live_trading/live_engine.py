@@ -811,7 +811,7 @@ class LiveEngine:
                     print(f"      [dbg] {ticker:5} EXCEPTION: {e}")
 
             # ── STEP 5: Regime gate ────────────────────────────────────
-            anchors        = {"AAPL", "QQQ"}
+            anchors        = {"AAPL", "NVDA"}
             active_sectors = REGIME_TO_SECTORS.get(regime, [])
 
             filtered: Dict[str, float] = {}
@@ -910,7 +910,7 @@ class LiveEngine:
             if _just_flipped_bull:
                 bear_was_short = _state.get("bear_duration_bars", 99) <= 30
                 anchor_size = 0.24 if bear_was_short else 0.22
-                for anchor in ("AAPL", "QQQ"):
+                for anchor in ("AAPL", "NVDA"):
                     if anchor not in held:
                         signals.append({
                             "date":       today_str,

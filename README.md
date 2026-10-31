@@ -316,7 +316,7 @@ The production layer added since going live on Alpaca:
 | Bull-Stable                 | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
 | Bear-Trending/Stable/Stress | defensive             | XOM, CVX, PG, WMT                |
 
-Anchors (AAPL, QQQ) bypass the gate and use the global model in all regimes.
+Anchors (AAPL, NVDA) bypass the gate and use the global model in all regimes.
 
 ---
 
