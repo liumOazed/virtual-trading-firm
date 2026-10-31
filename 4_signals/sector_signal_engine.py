@@ -14,7 +14,7 @@ Sector → PKL → Tickers → Native threshold:
 
 HMM regime → sector deployment (Option A gating):
   Bull-Trending → Hardware + Autos
-  Bull-Stable   → Hypercloud
+  Bull-Stable   → Hypercloud + Hardware
   Bear-Stress   → Defensive
   Bear-Stable   → Defensive
 
@@ -58,7 +58,7 @@ SECTOR_REGISTRY = {
         "pkl":             "4_signals/models/hardware_model.pkl",
         "tickers":         ["AVGO", "ASML", "AMD", "TSM"],  # NVDA moved to global anchors
         "native_threshold": 0.52,
-        "deploy_regimes":  ["Bull-Trending"],
+        "deploy_regimes":  ["Bull-Trending", "Bull-Stable"],
     },
     "hypercloud": {
         "name":            "Hypercloud",
@@ -93,7 +93,7 @@ SECTOR_REGISTRY = {
 # HMM regime → active sectors mapping (Option A gating)
 REGIME_TO_SECTORS = {
     "Bull-Trending": ["hardware", "autos", "gold"],
-    "Bull-Stable":   ["hypercloud", "gold"],
+    "Bull-Stable":   ["hypercloud", "hardware", "gold"],
     "Bear-Stress":   ["defensive", "gold"],
     "Bear-Stable":   ["defensive", "gold"],
 }
