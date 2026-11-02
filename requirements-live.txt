@@ -4,6 +4,7 @@
 # library versions they were trained with.
 numpy
 pandas
+pyarrow
 scipy
 requests
 python-dotenv
