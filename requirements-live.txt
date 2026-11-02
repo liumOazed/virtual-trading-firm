@@ -4,12 +4,15 @@
 # library versions they were trained with.
 numpy
 pandas
+pyarrow
 scipy
 requests
 python-dotenv
 pytz
 yfinance
 xgboost
+lightgbm
+arch
 scikit-learn
 joblib
 hmmlearn

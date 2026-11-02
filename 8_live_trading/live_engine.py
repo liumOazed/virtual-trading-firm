@@ -579,7 +579,12 @@ class LiveEngine:
             # Load the live pkl and run the signal engine components
             # without running the full backtest loop.
             print("\n  [3] Signal generation")
+            self._signal_error = None
             signals = self._generate_signals(equity)
+            if self._signal_error:
+                # Surface it so run_live.py exits non-zero (a crashed model
+                # load is not the same as "no signals today").
+                results["errors"].append(f"Signal generation: {self._signal_error}")
             results["signals"] = signals
 
             if not signals:
@@ -929,6 +934,7 @@ class LiveEngine:
         except Exception as e:
             print(f"      ⚠ Signal generation error: {e}")
             traceback.print_exc()
+            self._signal_error = str(e)
 
         if not self.dry_run:
             _save_hold_state(_hold_state)
