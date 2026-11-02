@@ -216,7 +216,7 @@ Schedule (Dhaka time):
         """
     )
     parser.add_argument("--status",  action="store_true", help="Show account + positions")
-    parser.add_argument("--dry-run", action="store_true", help="Signals only, no orders")
+    parser.add_argument("--dry-run", "--dryrun", dest="dry_run", action="store_true", help="Signals only, no orders")
     parser.add_argument("--explain", action="store_true", help="Run Groq briefing after trading")
     parser.add_argument("--refresh", action="store_true", help="Full 252-day price refresh")
     parser.add_argument("--reset",   action="store_true", help="Reset paper account")

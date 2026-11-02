@@ -1,0 +1,25 @@
+# Packages needed by the scheduled daily run (GitHub Actions).
+# The workflow pins exact versions from the state bundle's
+# state_requirements.txt when present, so pickled models load with the same
+# library versions they were trained with.
+numpy
+pandas
+scipy
+requests
+python-dotenv
+pytz
+yfinance
+xgboost
+scikit-learn
+joblib
+hmmlearn
+optuna
+shap
+pandas-ta
+feedparser
+newsapi-python
+langchain-core
+openpyxl
+matplotlib
+cryptography
+exchange_calendars

@@ -24,13 +24,15 @@ Benchmarks (SPY, QQQ) and the book are indexed to your FIRST log run
 the same date overwrites that date's rows rather than duplicating them.
 
 Usage:
-  python aria_growth_daily_log.py          # log today's snapshot + print summary
+  python aria_growth_daily_log.py            # log today's snapshot + print summary
+  python aria_growth_daily_log.py --dry-run  # compute + print, write nothing
 
 Install: pip install requests pandas yfinance
 """
 
 import sys
 import json
+import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -86,6 +88,12 @@ def append_idempotent(path: Path, new_df: pd.DataFrame, date_str: str):
 
 
 def main():
+    ap = argparse.ArgumentParser(description="ARIA-Growth daily snapshot logger (read-only)")
+    ap.add_argument("--dry-run", "--dryrun", dest="dry_run", action="store_true",
+                    help="Compute and print the snapshot but write no CSV/state files")
+    args = ap.parse_args()
+    dry_run = args.dry_run
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     h = _keys()
     acct = get_account(h)
@@ -119,7 +127,8 @@ def main():
     else:
         base = {"inception_date": date_str, "equity_base": equity,
                 "spy_base": bm["SPY"]["last"], "qqq_base": bm["QQQ"]["last"]}
-        LOG_STATE.write_text(json.dumps(base, indent=2))
+        if not dry_run:
+            LOG_STATE.write_text(json.dumps(base, indent=2))
 
     book_since = equity / base["equity_base"] - 1
     spy_since  = bm["SPY"]["last"] / base["spy_base"] - 1
@@ -173,12 +182,14 @@ def main():
         "n_sectors": None,   # sector needs the screen; left blank unless wired in
     }])
 
-    append_idempotent(POSITIONS_CSV, pos_df, date_str)
-    append_idempotent(PORTFOLIO_CSV, port_row, date_str)
+    if not dry_run:
+        append_idempotent(POSITIONS_CSV, pos_df, date_str)
+        append_idempotent(PORTFOLIO_CSV, port_row, date_str)
 
     # ── console summary ──
     print("=" * 70)
-    print(f"  ARIA-Growth - Daily Log  {date_str}  (account {acct_num})")
+    print(f"  ARIA-Growth - Daily Log  {date_str}  (account {acct_num})"
+          f"{'  [DRY RUN - nothing written]' if dry_run else ''}")
     print("=" * 70)
     print(f"  Regime {regime} | SPY trend {info['trend_vs_200dma_pct']:+.1f}% "
           f"vol {info['realized_vol_pct']}% dd {info['drawdown_from_high_pct']:+.1f}%")
@@ -194,8 +205,9 @@ def main():
         for _, r in pos_df.sort_values("total_pnl_pct").iterrows():
             print(f"  {r['ticker']:<7}{r['day_change_pct']:>6.1f}%{r['total_pnl_pct']:>8.1f}%"
                   f"{r['total_pnl_usd']:>9,.0f}{r['room_to_stop_pct']:>9.1f}pt")
-    print(f"\n  [saved] {POSITIONS_CSV}  (+{len(pos_df)} rows)")
-    print(f"  [saved] {PORTFOLIO_CSV}  (+1 row)")
+    tag = "[dry-run, not saved]" if dry_run else "[saved]"
+    print(f"\n  {tag} {POSITIONS_CSV}  (+{len(pos_df)} rows)")
+    print(f"  {tag} {PORTFOLIO_CSV}  (+1 row)")
     if date_str == base["inception_date"]:
         print(f"\n  [*] Baseline set today -- 'since go-live' starts from here.")
 

@@ -125,3 +125,7 @@ _docs_v1/
 
 # live engine runtime state (changes every run)
 /8_live_trading/data/position_hold_state.json
+
+# encryption key for the GitHub Actions state bundle (scripts/state_bundle.py)
+.state_key
+/.state/
