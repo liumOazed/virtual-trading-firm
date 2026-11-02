@@ -107,8 +107,8 @@ def _keys():
     #      us onto ARIA's account)
     # We deliberately do NOT fall back to a bare ALPACA_API_KEY shell var or
     # ARIA's 8_live_trading/.env, so the two books can never share an account.
-    k = os.environ.get("GROWTH_ALPACA_API_KEY")
-    s = os.environ.get("GROWTH_ALPACA_SECRET_KEY")
+    k = (os.environ.get("GROWTH_ALPACA_API_KEY") or "").strip()
+    s = (os.environ.get("GROWTH_ALPACA_SECRET_KEY") or "").strip()
     if not k or not s:
         here = Path(__file__).resolve().parent          # the 9_aria_growth folder
         for p in [here / ".env", Path("9_aria_growth/.env"), Path(".env")]:

@@ -65,8 +65,10 @@ class AlpacaClient:
         api_key:    Optional[str] = None,
         secret_key: Optional[str] = None,
     ):
-        self._api_key    = api_key    or os.getenv("ALPACA_API_KEY",    "")
-        self._secret_key = secret_key or os.getenv("ALPACA_SECRET_KEY", "")
+        # strip(): keys pasted into .env files or CI secrets often carry a
+        # trailing newline/space, which requests rejects as an invalid header.
+        self._api_key    = (api_key    or os.getenv("ALPACA_API_KEY",    "")).strip()
+        self._secret_key = (secret_key or os.getenv("ALPACA_SECRET_KEY", "")).strip()
 
         if not self._api_key or not self._secret_key:
             raise ValueError(

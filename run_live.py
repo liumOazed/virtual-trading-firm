@@ -192,6 +192,11 @@ def cmd_run(dry_run: bool = False, explain: bool = False):
         print(f"    Equity log:  {EQUITY_LOG} ({len(eq)} rows)")
     print()
 
+    # Non-zero exit so a scheduler (GitHub Actions) shows the run as failed
+    # instead of green when the engine hit errors.
+    if results["errors"]:
+        sys.exit(1)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # ENTRY POINT
