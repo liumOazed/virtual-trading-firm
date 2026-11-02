@@ -11,6 +11,8 @@ python-dotenv
 pytz
 yfinance
 xgboost
+lightgbm
+arch
 scikit-learn
 joblib
 hmmlearn

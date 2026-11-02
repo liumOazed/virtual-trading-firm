@@ -66,7 +66,7 @@ EXCLUDE_SUFFIXES = {".env", ".pyc", ".pyo", ".ini", ".tmp", ".bak", ".log"}
 
 # Packages whose versions must match the PC that trained/pickled the models.
 PIN_PACKAGES = [
-    "numpy", "pandas", "pyarrow", "scipy", "scikit-learn", "xgboost", "joblib", "hmmlearn",
+    "numpy", "pandas", "pyarrow", "scipy", "scikit-learn", "xgboost", "lightgbm", "arch", "joblib", "hmmlearn",
     "yfinance", "pandas-ta", "pandas_ta", "optuna", "shap", "requests",
     "python-dotenv", "pytz", "feedparser", "openpyxl", "newsapi-python",
     "langchain-core", "langchain_core", "matplotlib",
