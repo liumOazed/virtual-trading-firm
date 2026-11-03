@@ -10,6 +10,11 @@ after that day's close, so each run covers "today in New York". Weekends are
 filtered by the cron, NYSE holidays by `scripts/market_day.py`. Your PC no longer
 needs to be on.
 
+GitHub doesn't guarantee scheduled runs, so there are backup slots at 03:50,
+04:40 and 05:40 Dhaka. A backup only runs if no live run has happened yet for
+that New York date (tracked in `last_run.json` on the `bot-state` branch), so
+the books never trade twice in one day.
+
 ## One-time setup
 
 ### 1. Repository secrets
