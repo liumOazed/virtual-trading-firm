@@ -17,7 +17,14 @@ name: Daily trading run
 
 on:
   schedule:
-    - cron: "15 21 * * 1-5"
+    # 03:15 Dhaka is the intended run. GitHub does not guarantee scheduled
+    # runs (they can be dropped or start very late), so three backup slots
+    # follow. Each backup exits immediately if a live run for this NY date
+    # already happened (bot-state/last_run.json), so only one run trades.
+    - cron: "15 21 * * 1-5"   # 03:15 Dhaka
+    - cron: "50 21 * * 1-5"   # 03:50 Dhaka (backup)
+    - cron: "40 22 * * 1-5"   # 04:40 Dhaka (backup)
+    - cron: "40 23 * * 1-5"   # 05:40 Dhaka (backup)
   workflow_dispatch:
     inputs:
       dry_run:
@@ -95,15 +102,26 @@ jobs:
         run: |
           pip install --quiet exchange_calendars
           python scripts/market_day.py
+          ny_date=$(grep '^ny_date=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2)
+          last=$(python -c "import json;print(json.load(open('.state/last_run.json'))['ny_date'])" 2>/dev/null || true)
           if [ "$FORCE" = "true" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "go=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "$last" = "$ny_date" ]; then
+            echo "Live run for NY $ny_date already done — this backup slot does nothing."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "already=true" >> "$GITHUB_OUTPUT"
           else
             grep -q '^open=true' "$GITHUB_OUTPUT" && echo "go=true" >> "$GITHUB_OUTPUT" || echo "go=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Market closed — nothing to do
+      - name: Nothing to do
         if: steps.market.outputs.go != 'true'
-        run: echo "### Market closed on ${{ steps.market.outputs.ny_date }} (NY) — skipped" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          if [ "${{ steps.market.outputs.already }}" = "true" ]; then
+            echo "### Already ran for ${{ steps.market.outputs.ny_date }} (NY) — backup slot skipped" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Market closed on ${{ steps.market.outputs.ny_date }} (NY) — skipped" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Install dependencies
         if: steps.market.outputs.go == 'true'
@@ -160,6 +178,9 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898729+github-actions[bot]@users.noreply.github.com"
           python scripts/state_bundle.py pack --out .state --no-pins
+          # Marks this NY date as done so later backup slots don't trade again
+          # (written even if a script failed, to never double-trade).
+          echo '{"ny_date": "${{ steps.market.outputs.ny_date }}", "run_id": "${{ github.run_id }}"}' > .state/last_run.json
           python scripts/state_bundle.py publish --src .state \
             --message "state after run ${{ github.run_id }} (NY ${{ steps.market.outputs.ny_date }})"
 
