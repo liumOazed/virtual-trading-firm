@@ -106,7 +106,10 @@ def main():
         sys.exit(1)
 
     now = datetime.now(timezone.utc)
-    date_str = now.strftime("%Y-%m-%d")
+    # Stamp the New York trading date, not the UTC date: a run that starts
+    # after 00:00 UTC (late GitHub schedule) is still covering that NY session.
+    from zoneinfo import ZoneInfo
+    date_str = now.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     ts = now.isoformat()
 
     equity = float(acct["equity"])
