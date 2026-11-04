@@ -59,8 +59,8 @@ from market_clock import NY, trading_date
 
 load_dotenv()
 
-API_KEY    = os.getenv("ALPACA_API_KEY")
-SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+API_KEY    = (os.getenv("ALPACA_API_KEY") or "").strip() or None      # strip: CI secrets may end in "\n"
+SECRET_KEY = (os.getenv("ALPACA_SECRET_KEY") or "").strip() or None
 TRADE_URL  = "https://paper-api.alpaca.markets"
 DATA_URL   = "https://data.alpaca.markets"
 HEADERS    = {"APCA-API-KEY-ID": API_KEY, "APCA-API-SECRET-KEY": SECRET_KEY,
