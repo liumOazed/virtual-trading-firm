@@ -106,6 +106,13 @@ jobs:
           last=$(python -c "import json;print(json.load(open('.state/last_run.json'))['ny_date'])" 2>/dev/null || true)
           if [ "$FORCE" = "true" ] || [ "${{ github.event_name }}" = "pull_request" ]; then
             echo "go=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=America/New_York date +%H%M)" -lt 1605 ]; then
+            # GitHub started this slot so late that New York has rolled into a
+            # new day whose session hasn't closed yet. Running now would stamp
+            # and trade the wrong day, so leave it to tonight's slots.
+            echo "Scheduled run started too late (NY $(TZ=America/New_York date '+%F %H:%M')) — skipping."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+            echo "late=true" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "schedule" ] && [ "$last" = "$ny_date" ]; then
             echo "Live run for NY $ny_date already done — this backup slot does nothing."
             echo "go=false" >> "$GITHUB_OUTPUT"
@@ -117,7 +124,9 @@ jobs:
       - name: Nothing to do
         if: steps.market.outputs.go != 'true'
         run: |
-          if [ "${{ steps.market.outputs.already }}" = "true" ]; then
+          if [ "${{ steps.market.outputs.late }}" = "true" ]; then
+            echo "### Scheduled slot started after New York midnight — skipped (would have traded the wrong day)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ steps.market.outputs.already }}" = "true" ]; then
             echo "### Already ran for ${{ steps.market.outputs.ny_date }} (NY) — backup slot skipped" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "### Market closed on ${{ steps.market.outputs.ny_date }} (NY) — skipped" >> "$GITHUB_STEP_SUMMARY"
