@@ -129,3 +129,6 @@ _docs_v1/
 # encryption key for the GitHub Actions state bundle (scripts/state_bundle.py)
 .state_key
 /.state/
+
+# auto-pull log (scripts/install_auto_pull.ps1)
+state_pull.log

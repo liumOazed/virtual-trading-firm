@@ -58,7 +58,10 @@ back. When that's green, the 03:15 schedule takes over.
 
 * **Stop the local Task Scheduler job** (if any). Otherwise your PC and GitHub
   both trade and their logs diverge.
-* To look at the latest logs on your PC: `python scripts/state_bundle.py pull`.
+* To have the latest CSVs on your PC automatically, run once:
+  `powershell -ExecutionPolicy Bypass -File scripts\install_auto_pull.ps1`
+  (pulls every day at noon and at login). Or pull by hand any time:
+  `python scripts/state_bundle.py pull`.
 * If you retrain models or re-screen locally, `pull` first, do the work, then
   `push` so the bot picks it up.
 * `bot-state` always holds a single commit (each run force-pushes), so the repo
