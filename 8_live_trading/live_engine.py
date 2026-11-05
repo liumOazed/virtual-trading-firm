@@ -251,6 +251,15 @@ class PositionReconciler:
         """
         orders = []
         current = {p["ticker"] for p in self.client.get_positions()}
+        # A buy submitted after the close sits as an OPEN order until the next
+        # open, so it isn't a position yet. Treat it as held, otherwise a second
+        # runner (e.g. the PC and GitHub both running) buys the same name twice.
+        try:
+            pending = {o["ticker"] for o in self.client.get_orders("open")
+                       if o.get("side") == "buy"}
+        except Exception as e:
+            print(f"  ⚠ Could not read open orders ({e}) — skipping all buys to avoid duplicates")
+            return orders
         cash_remaining = available_cash * 0.95  # keep 5% cash buffer
 
         for sig in buy_signals:
@@ -260,6 +269,10 @@ class PositionReconciler:
             if ticker in current:
                 if self.verbose:
                     print(f"  → BUY {ticker}: already held, skip")
+                continue
+            if ticker in pending:
+                if self.verbose:
+                    print(f"  → BUY {ticker}: buy order already open (not filled yet), skip")
                 continue
 
             if notional > cash_remaining:
