@@ -199,7 +199,18 @@ def push_dir(src_dir: Path, message: str):
     return commit
 
 
+def _clean_git_desktop_ini():
+    """Google Drive drops desktop.ini files inside .git/, which git then reads
+    as corrupt refs ("bad object refs/desktop.ini") and every fetch fails."""
+    for p in (ROOT / ".git").rglob("desktop.ini"):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def fetch_dir(dest: Path) -> bool:
+    _clean_git_desktop_ini()
     r = subprocess.run(["git", "fetch", "--depth=1", "origin", BRANCH], cwd=ROOT,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if r.returncode != 0:
