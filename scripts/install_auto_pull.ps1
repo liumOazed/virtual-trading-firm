@@ -15,7 +15,9 @@
 
 $ErrorActionPreference = "Stop"
 $repo   = Split-Path -Parent $PSScriptRoot
-$python = (Get-Command python -ErrorAction Stop).Source
+# Prefer the repo's venv (it has the packages); fall back to python on PATH.
+$venvPy = Join-Path $repo "venv\Scripts\python.exe"
+$python = if (Test-Path $venvPy) { $venvPy } else { (Get-Command python -ErrorAction Stop).Source }
 # pythonw.exe runs with no console window, so there's nothing to close by
 # accident (closing the window killed the noon pull on 2026-11-06).
 $pythonw = Join-Path (Split-Path -Parent $python) "pythonw.exe"
