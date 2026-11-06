@@ -16,14 +16,18 @@
 $ErrorActionPreference = "Stop"
 $repo   = Split-Path -Parent $PSScriptRoot
 $python = (Get-Command python -ErrorAction Stop).Source
+# pythonw.exe runs with no console window, so there's nothing to close by
+# accident (closing the window killed the noon pull on 2026-11-06).
+$pythonw = Join-Path (Split-Path -Parent $python) "pythonw.exe"
+if (-not (Test-Path $pythonw)) { $pythonw = $python }
 $log    = Join-Path $repo "state_pull.log"
 
 if (-not (Test-Path (Join-Path $repo ".state_key"))) {
     throw ".state_key not found in $repo - run 'python scripts/state_bundle.py keygen' setup first."
 }
 
-$cmd = "cd /d `"$repo`" && `"$python`" scripts\state_bundle.py pull >> `"$log`" 2>&1"
-$action   = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $cmd" -WorkingDirectory $repo
+$action   = New-ScheduledTaskAction -Execute $pythonw `
+            -Argument "scripts\state_bundle.py pull --log `"$log`"" -WorkingDirectory $repo
 $triggers = @(
     (New-ScheduledTaskTrigger -Daily -At 12:00pm),
     (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME)
