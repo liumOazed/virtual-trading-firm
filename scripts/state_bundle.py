@@ -73,9 +73,14 @@ PIN_PACKAGES = [
 ]
 
 
+# On Windows, don't flash a console window for each git call (the scheduled
+# pull runs under pythonw.exe with no console at all).
+NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 def git(*args, input_bytes=None, check=True) -> bytes:
-    r = subprocess.run(["git", *args], cwd=ROOT, input=input_bytes,
+    r = subprocess.run(["git", *args], cwd=ROOT, input=input_bytes, **NO_WINDOW,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if check and r.returncode != 0:
         raise SystemExit(f"git {' '.join(args)} failed:\n{r.stderr.decode(errors='replace')}")
@@ -223,7 +228,7 @@ def _clean_git_desktop_ini():
 
 def fetch_dir(dest: Path) -> bool:
     _clean_git_desktop_ini()
-    r = subprocess.run(["git", "fetch", "--depth=1", "origin", BRANCH], cwd=ROOT,
+    r = subprocess.run(["git", "fetch", "--depth=1", "origin", BRANCH], cwd=ROOT, **NO_WINDOW,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if r.returncode != 0:
         print(r.stderr.decode(errors="replace").strip(), file=sys.stderr)
@@ -240,7 +245,7 @@ def self_update():
     to GitHub (including to this script) reach the PC without a manual git pull.
     Never fails the pull: local edits or conflicts just leave the code as is."""
     _clean_git_desktop_ini()
-    r = subprocess.run(["git", "pull", "--ff-only", "origin", "main"], cwd=ROOT,
+    r = subprocess.run(["git", "pull", "--ff-only", "origin", "main"], cwd=ROOT, **NO_WINDOW,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     msg = (r.stdout + r.stderr).decode(errors="replace").strip().splitlines()
     if r.returncode == 0:
@@ -257,7 +262,8 @@ def main():
     sub.add_parser("keygen")
     sub.add_parser("list")
     sub.add_parser("push")
-    sub.add_parser("pull")
+    pl = sub.add_parser("pull")
+    pl.add_argument("--log", help="append all output to this file (used by the hidden scheduled task)")
     p = sub.add_parser("pack"); p.add_argument("--out", required=True)
     p.add_argument("--no-pins", action="store_true",
                    help="don't rewrite requirements.lock / python-version (CI keeps the PC's pins)")
@@ -266,6 +272,8 @@ def main():
     b = sub.add_parser("publish"); b.add_argument("--src", required=True)
     b.add_argument("--message", default="state from GitHub Actions")
     args = ap.parse_args()
+    if getattr(args, "log", None):
+        sys.stdout = sys.stderr = open(args.log, "a", encoding="utf-8", buffering=1)
 
     if args.cmd == "keygen":
         from cryptography.fernet import Fernet
