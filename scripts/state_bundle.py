@@ -126,11 +126,23 @@ def safe_extract(tar_bytes: bytes):
             target = (ROOT / m.name).resolve()
             if not str(target).startswith(str(ROOT)) or not (m.isfile() or m.isdir()):
                 raise SystemExit(f"Refusing suspicious bundle entry: {m.name}")
-        if hasattr(tarfile, "data_filter"):
-            tar.extractall(ROOT, filter="data")
-        else:
-            tar.extractall(ROOT)
-        return [m.name for m in tar.getmembers() if m.isfile()]
+        done, locked = [], []
+        for m in tar.getmembers():
+            try:
+                if hasattr(tarfile, "data_filter"):
+                    tar.extract(m, ROOT, filter="data")
+                else:
+                    tar.extract(m, ROOT)
+                if m.isfile():
+                    done.append(m.name)
+            except PermissionError:
+                # On Windows a CSV that is open in Excel can't be overwritten.
+                # Skip it instead of aborting the whole restore.
+                locked.append(m.name)
+        for name in locked:
+            print(f"WARNING: {name} is open in another program (Excel?) - not updated. "
+                  f"Close it and run the pull again.", file=sys.stderr)
+        return done
 
 
 def pinned_requirements() -> str:
@@ -214,12 +226,28 @@ def fetch_dir(dest: Path) -> bool:
     r = subprocess.run(["git", "fetch", "--depth=1", "origin", BRANCH], cwd=ROOT,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if r.returncode != 0:
+        print(r.stderr.decode(errors="replace").strip(), file=sys.stderr)
         return False
     dest.mkdir(parents=True, exist_ok=True)
     listing = git("ls-tree", "--name-only", "FETCH_HEAD").decode().split()
     for name in listing:
         (dest / name).write_bytes(git("cat-file", "blob", f"FETCH_HEAD:{name}"))
     return True
+
+
+def self_update():
+    """Best effort: fast-forward the PC's checkout to origin/main so fixes pushed
+    to GitHub (including to this script) reach the PC without a manual git pull.
+    Never fails the pull: local edits or conflicts just leave the code as is."""
+    _clean_git_desktop_ini()
+    r = subprocess.run(["git", "pull", "--ff-only", "origin", "main"], cwd=ROOT,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    msg = (r.stdout + r.stderr).decode(errors="replace").strip().splitlines()
+    if r.returncode == 0:
+        print("code: " + (msg[-1] if msg else "up to date"))
+    else:
+        print("code update skipped (state pull continues): " + (msg[-1] if msg else "git error"),
+              file=sys.stderr)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -267,9 +295,11 @@ def main():
               f"to branch {BRANCH} @ {commit[:8]}")
 
     elif args.cmd == "pull":
+        print(f"--- pull {datetime.now().isoformat(timespec='seconds')} ---")
+        self_update()
         with tempfile.TemporaryDirectory() as d:
             if not fetch_dir(Path(d)):
-                raise SystemExit(f"No {BRANCH} branch on origin yet.")
+                raise SystemExit(f"Could not fetch the {BRANCH} branch (git error above).")
             names = unpack(Path(d))
         print(f"Restored {len(names)} files from {BRANCH}.")
 
