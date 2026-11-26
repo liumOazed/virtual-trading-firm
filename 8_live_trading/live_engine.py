@@ -32,6 +32,21 @@ import shutil
 import traceback
 from datetime import datetime, date
 from market_clock import ny_today, trading_date   # New York date, never local
+
+# ── Anchor policy ────────────────────────────────────────────────────────
+# Until Nov 30, 2026 (NY date) the anchors are AAPL + NVDA (PR #1). From
+# Dec 1, 2026 the engine returns to the original allocation: AAPL + QQQ are
+# the anchors (bypass the regime gate, re-bought on a Bear->Bull flip), and
+# NVDA is an ordinary hardware-sector ticker that is bought only when its
+# sector proba clears the hardware buy line while hardware is active.
+ORIGINAL_ALLOCATION_FROM = date(2026, 12, 1)
+
+
+def anchors_for(day: date) -> tuple:
+    """Anchor tickers in force on a given New York date."""
+    if day >= ORIGINAL_ALLOCATION_FROM:
+        return ("AAPL", "QQQ")
+    return ("AAPL", "NVDA")
 from typing import Dict, List, Optional
 
 import time
@@ -693,6 +708,8 @@ class LiveEngine:
         signals     = []
         today_str   = ny_today().strftime("%Y-%m-%d")
         _hold_state = _load_hold_state()   # safe default; overwritten inside try
+        anchors     = anchors_for(ny_today())
+        print(f"      Anchors: {', '.join(anchors)}")
 
         try:
             # Load live price data
@@ -795,6 +812,8 @@ class LiveEngine:
             # ── STEP 4: Sector engine overwrites where active ──────────
             sector_thresholds: Dict[str, float] = {}
             for ticker in TICKERS:
+                if ticker in anchors:
+                    continue   # anchors always use the global score
                 try:
                     sig = self._sector_engine.get_signals(
                         ticker, last_bar_date, regime,
@@ -829,7 +848,6 @@ class LiveEngine:
                     print(f"      [dbg] {ticker:5} EXCEPTION: {e}")
 
             # ── STEP 5: Regime gate ────────────────────────────────────
-            anchors        = {"AAPL", "NVDA"}
             active_sectors = REGIME_TO_SECTORS.get(regime, [])
 
             filtered: Dict[str, float] = {}
@@ -928,7 +946,7 @@ class LiveEngine:
             if _just_flipped_bull:
                 bear_was_short = _state.get("bear_duration_bars", 99) <= 30
                 anchor_size = 0.24 if bear_was_short else 0.22
-                for anchor in ("AAPL", "NVDA"):
+                for anchor in anchors:
                     if anchor not in held:
                         signals.append({
                             "date":       today_str,
