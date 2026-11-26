@@ -16,7 +16,7 @@
 
 Every evening after the US close, `run_live.py` scores 16 tickers, decides exits and entries, and places paper orders on Alpaca. This traces `8_live_trading/live_engine.py` as it stands on main today.
 
-> **Changing Oct 31:** PR #1 swaps the anchor QQQ for NVDA. After it merges, the anchors that bypass the regime gate and get re-bought on a bull flip are AAPL and NVDA. Details are in [What PR #1 changes on Oct 31](#what-pr-1-changes-on-oct-31) below.
+> **Anchors by date:** from Oct 31 to Nov 30, 2026 the anchors that bypass the regime gate and get re-bought on a bull flip are AAPL and NVDA (PR #1). **From Dec 1, 2026 (NY date) the engine returns to the original AAPL + QQQ anchors**, and NVDA goes back to being an ordinary hardware-sector ticker that is bought only when its proba clears the hardware buy line. The switch is date-gated in `live_engine.py` (`ORIGINAL_ALLOCATION_FROM`). Details are in [Back to the original allocation on Dec 1](#back-to-the-original-allocation-on-dec-1) below.
 
 ```mermaid
 flowchart TD
@@ -107,6 +107,10 @@ The comment at the top of `sector_signal_engine.py` lists older lines (0.38, 0.3
 #### What PR #1 changes on Oct 31
 
 The anchor set becomes **AAPL and NVDA**, in both the regime gate and the bull-flip re-entry. NVDA also leaves the hardware sector, so it will be scored only by the global model and bought against the regime buy line (0.50 / 0.52 / 0.58) in any regime, rather than only in Bull-Trending and Bull-Stable at 0.52. QQQ stays in the ticker list but belongs to no sector and is no longer an anchor, so the engine will never buy it. If QQQ is held on the day of the merge, it can still be sold through the 0.45 global sell line.
+
+#### Back to the original allocation on Dec 1
+
+From Dec 1, 2026 (New York date) the PR #1 swap is undone. The anchors are **AAPL and QQQ** again, in both the regime gate and the bull-flip re-entry (22% / 24% of equity each, no score check). NVDA rejoins the hardware sector: it is scored by the hardware model and bought only when that proba beats 0.52 while hardware is active, at the regime position size like any other sector ticker. It is never force-bought on a bull flip. An NVDA position already held on Dec 1 is kept and exits through the hardware sell line (0.416). Before Dec 1 the engine keeps the PR #1 behaviour, so merging early changes nothing.
 
 
 ## Current State (June 2026)
@@ -316,7 +320,7 @@ The production layer added since going live on Alpaca:
 | Bull-Stable                 | hypercloud, gold      | MSFT, GOOGL, AMZN, META, GLD     |
 | Bear-Trending/Stable/Stress | defensive             | XOM, CVX, PG, WMT                |
 
-Anchors (AAPL, NVDA) bypass the gate and use the global model in all regimes.
+Anchors (AAPL, QQQ from Dec 1, 2026; AAPL, NVDA from Oct 31 to Nov 30) bypass the gate and use the global model in all regimes.
 
 From Oct 31, 2026, hardware is also active in Bull-Stable as a one-month test, so its tickers pass the gate there too.
 
